@@ -1,0 +1,52 @@
+# Environment files
+.env
+*.env
+
+# SSH keys
+*.pem
+id_*
+*.pub
+
+# Azure
+.azure/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Bicep compiled output (not needed in repo)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!bicepconfig.json
+!tests/test_helper/fixtures/*.json
+
+# Extension build artifacts
+extension/node_modules/
+extension/dist/
+extension/out/
+extension/.vscode-test/
+*.vsix
+
+# Board pass / starter kit output
+*.board-pass
+*-board.zip
+
+# Bats test helper libraries (cloned, not vendored)
+tests/test_helper/bats-support/
+tests/test_helper/bats-assert/
+
+# Integration test keys
+tests/integration/test-key
+tests/integration/test-key.pub
+
+# Node
+node_modules/
