@@ -104,11 +104,148 @@ write_files:
       fi
       echo ""
 
+      # ── Step 3: Tool verification ──
+      echo -e "${BOLD}Step 3: Verifying Tools${NC}"
+      echo ""
+
+      tools=(
+          "git:git --version"
+          "Python:python3 --version"
+          "uv:uv --version"
+          "Node.js:node --version"
+          "npm:npm --version"
+          "pnpm:pnpm --version"
+          "Docker:docker --version"
+          "Docker Compose:docker compose version"
+          "Azure CLI:az version --query '\"azure-cli\"' -o tsv"
+          "just:just --version"
+          "neovim:nvim --version | head -1"
+          "GitHub CLI:gh --version | head -1"
+          "jq:jq --version"
+      )
+
+      pass=0
+      fail=0
+
+      for tool in "${tools[@]}"; do
+          name="${tool%%:*}"
+          cmd="${tool#*:}"
+          if output=$(eval "$cmd" 2>&1); then
+              echo -e "  ${GREEN}✓${NC} $name → $output"
+              ((pass++))
+          else
+              echo -e "  ${RED}✗${NC} $name → not found or failed"
+              ((fail++))
+          fi
+      done
+
+      echo ""
+
+      echo -e "  Checking Docker runs without sudo..."
+      if docker run --rm hello-world &>/dev/null; then
+          echo -e "  ${GREEN}✓${NC} Docker works without sudo"
+          ((pass++))
+      else
+          echo -e "  ${RED}✗${NC} Docker requires sudo — try logging out and back in"
+          ((fail++))
+      fi
+
+      echo ""
+      echo -e "  ${BOLD}Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
+      echo ""
+
+      # ── Step 4: Quick orientation ──
+      echo -e "${BOLD}Step 4: Your Workspace${NC}"
+      echo ""
+      echo "  Your project directory: ~/projects"
+      echo "  To clone a repo:        cd ~/projects && git clone <url>"
+      echo ""
+      echo "  Useful commands:"
+      echo "    gs            -> git status"
+      echo "    dc up         -> docker compose up"
+      echo "    dc down       -> docker compose down"
+
+      # ── Signal completion (for VS Code extension first-run detection) ──
+      touch ~/.setup-me-complete
+
       # ── Done ──
+      echo ""
       echo -e "${BLUE}${BOLD}╭───────────────────────────────────────────────╮${NC}"
       echo -e "${BLUE}${BOLD}│  Setup complete. You're ready to code.        │${NC}"
+      echo -e "${BLUE}${BOLD}│                                               │${NC}"
+      echo -e "${BLUE}${BOLD}│  Next: cd ~/projects && git clone <your-repo> │${NC}"
       echo -e "${BLUE}${BOLD}╰───────────────────────────────────────────────╯${NC}"
       echo ""
+
+  - path: /etc/update-motd.d/50-board
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Board dynamic MOTD — must render in <500ms
+      # Reads cached health check results, never runs live checks
+
+      bold=$'\033[1m'
+      dim=$'\033[2m'
+      green=$'\033[32m'
+      red=$'\033[31m'
+      sky=$'\033[38;2;14;165;233m'
+      reset=$'\033[0m'
+
+      # Read board config
+      BOARD_NAME="board"
+      BOARD_REGION=""
+      BOARD_SIZE=""
+      if [[ -f /home/devuser/.board/config ]]; then
+          source /home/devuser/.board/config 2>/dev/null
+      fi
+
+      # Read last check results
+      TOTAL=0; PASSED=0; FAILED=0; LAST_CHECK=""
+      if [[ -f /home/devuser/.board/last-check ]]; then
+          source /home/devuser/.board/last-check 2>/dev/null
+          LAST_CHECK="$TIMESTAMP"
+      fi
+
+      # Disk info
+      DISK_PCT=$(df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || echo "?")
+      DISK_FREE=$(df -h / --output=avail 2>/dev/null | tail -1 | tr -d ' ' || echo "?")
+
+      # Uptime
+      UPTIME=$(uptime -p 2>/dev/null | sed 's/^up //' || echo "unknown")
+
+      echo ""
+      echo "  ${sky}┌──────────────────────────────────────────────┐${reset}"
+      echo "  ${sky}│${reset}  ${bold}${BOARD_NAME}${reset}  │  ${dim}${BOARD_REGION}${reset}  │  ${dim}${BOARD_SIZE}${reset}     ${sky}│${reset}"
+      echo "  ${sky}└──────────────────────────────────────────────┘${reset}"
+      echo ""
+
+      # Health summary
+      if (( TOTAL > 0 )); then
+          if (( FAILED == 0 )); then
+              echo "  ${bold}Health${reset}        ${green}${PASSED}/${TOTAL} passed${reset}"
+          else
+              echo "  ${bold}Health${reset}        ${red}${FAILED} issue(s)${reset} (${PASSED}/${TOTAL} passed)"
+          fi
+      fi
+
+      echo "  ${bold}Uptime${reset}        ${UPTIME}"
+      echo "  ${bold}Disk${reset}          ${DISK_PCT}% used (${DISK_FREE} free)"
+      echo ""
+      echo "  ${dim}check${reset}         run health checks"
+      echo "  ${dim}board-help${reset}    show all commands"
+      echo ""
+      echo "  ${dim}board v1.0.0${reset}"
+      echo ""
+
+  - path: /home/devuser/.board/config
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      # Board configuration — populated during provisioning
+      BOARD_NAME="board"
+      BOARD_REGION=""
+      BOARD_SIZE=""
 
 runcmd:
   # ── Fix ownership of home directory and subdirectories ──
@@ -130,6 +267,19 @@ runcmd:
 
   # ── Enable systemd user services without login (for persistent dev services) ──
   - loginctl enable-linger devuser
+
+  # ── Node.js 22: add repo and install ──
+  - |
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list
+    apt-get update
+    apt-get install -y nodejs
+
+  # ── pnpm via corepack ──
+  - corepack enable
+  - corepack prepare pnpm@10.33.0 --activate
 
   # ── Python: install from deadsnakes if not already 3.12+ ──
   - add-apt-repository -y ppa:deadsnakes/ppa
@@ -157,6 +307,16 @@ runcmd:
     apt-get update
     apt-get install -y gh
 
+  # ── yq (YAML parser for provisioning engine) ──
+  - |
+    wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    chmod +x /usr/local/bin/yq
+
+  # ── Disable default Ubuntu MOTD noise, keep custom Board MOTD ──
+  - chmod -x /etc/update-motd.d/*
+  - chmod +x /etc/update-motd.d/50-board
+  - echo "" > /etc/motd
+
   # ── SSH hardening ──
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
@@ -169,6 +329,223 @@ runcmd:
   # ── Create dev workspace ──
   - mkdir -p /home/devuser/projects
   - chown devuser:devuser /home/devuser/projects
+
+  # ── tmux configuration ──
+  - |
+    cat > /home/devuser/.tmux.conf << 'TMUX'
+    # ── Mouse support (click panes, resize, scroll) ──
+    set -g mouse on
+
+    # ── Start window numbering at 1 (matches keyboard layout) ──
+    set -g base-index 1
+    setw -g pane-base-index 1
+
+    # ── Increase scrollback buffer ──
+    set -g history-limit 10000
+
+    # ── Status bar ──
+    set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
+    set -g status-left ' #[fg=#89b4fa,bold]#S #[default]│ '
+    set -g status-right ' #[fg=#a6adc8]%H:%M  %d %b #[default]│ #[fg=#89b4fa]#H '
+    set -g status-left-length 30
+    set -g status-right-length 40
+
+    # ── Window status ──
+    setw -g window-status-format ' #I:#W '
+    setw -g window-status-current-format '#[fg=#1e1e2e,bg=#89b4fa,bold] #I:#W '
+
+    # ── Pane borders ──
+    set -g pane-border-style 'fg=#45475a'
+    set -g pane-active-border-style 'fg=#89b4fa'
+
+    # ── Quality of life ──
+    set -g renumber-windows on
+    set -s escape-time 0
+    set -g default-terminal "tmux-256color"
+
+    # ── Split panes with | and - (more intuitive than % and ") ──
+    bind | split-window -h -c "#{pane_current_path}"
+    bind - split-window -v -c "#{pane_current_path}"
+
+    # ── Reload config ──
+    bind r source-file ~/.tmux.conf \; display "Config reloaded"
+    TMUX
+    chown devuser:devuser /home/devuser/.tmux.conf
+
+  # ── Sample project (hello-board) ──
+  - mkdir -p /home/devuser/projects/hello-board/.devcontainer
+  - |
+    cat > /home/devuser/projects/hello-board/docker-compose.yml << 'COMPOSE'
+    services:
+      api:
+        build: .
+        ports:
+          - "8000:8000"
+        volumes:
+          - .:/app
+    COMPOSE
+  - |
+    cat > /home/devuser/projects/hello-board/Dockerfile << 'DOCKERFILE'
+    FROM python:3.12-slim
+    WORKDIR /app
+    COPY requirements.txt .
+    RUN pip install --no-cache-dir -r requirements.txt
+    COPY . .
+    CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    DOCKERFILE
+  - |
+    cat > /home/devuser/projects/hello-board/requirements.txt << 'REQS'
+    fastapi==0.135.2
+    uvicorn[standard]==0.42.0
+    REQS
+  - |
+    cat > /home/devuser/projects/hello-board/main.py << 'MAIN'
+    from fastapi import FastAPI
+    import platform
+
+    app = FastAPI(title="Hello Board")
+
+    @app.get("/")
+    def root():
+        return {
+            "message": "Your board is working.",
+            "hostname": platform.node(),
+            "python": platform.python_version(),
+            "tip": "Edit main.py — the server reloads automatically."
+        }
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+    MAIN
+  - |
+    cat > /home/devuser/projects/hello-board/README.md << 'README'
+    # Hello Board
+
+    A sample project to verify your development environment works.
+
+    ## Quick start
+
+    ```bash
+    cd ~/projects/hello-board
+    docker compose up --build
+    ```
+
+    Then open http://localhost:8000 in your browser.
+    (If you're connected via VS Code Remote SSH, port forwarding happens automatically.)
+
+    ## What to try
+
+    1. Edit `main.py` — change the message, save, and refresh the browser.
+       The server reloads automatically.
+    2. Visit http://localhost:8000/docs to see the auto-generated API documentation.
+    3. When you're done: `docker compose down`
+
+    ## This is a throwaway project
+
+    Delete it whenever you want: `rm -rf ~/projects/hello-board`
+    README
+  - |
+    cat > /home/devuser/projects/hello-board/.devcontainer/devcontainer.json << 'DEVCONTAINER'
+    {
+      "name": "Hello Board",
+      "dockerComposeFile": "../docker-compose.yml",
+      "service": "api",
+      "workspaceFolder": "/app",
+      "customizations": {
+        "vscode": {
+          "extensions": [
+            "ms-python.python",
+            "ms-python.vscode-pylance"
+          ],
+          "settings": {
+            "python.defaultInterpreterPath": "/usr/local/bin/python"
+          }
+        }
+      },
+      "forwardPorts": [8000]
+    }
+    DEVCONTAINER
+  - chown -R devuser:devuser /home/devuser/projects/hello-board
+
+  # ── Pre-pull Docker image for sample project ──
+  - docker pull python:3.12-slim
+
+  # ── Bash profile for devuser ──
+  - |
+    cat >> /home/devuser/.bashrc << 'BASHRC'
+
+    # ── Board environment ──
+    export EDITOR=nvim
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Prompt: user@vm-name:~/path (git-branch)$
+    parse_git_branch() {
+      git branch 2>/dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ (\1)/'
+    }
+    export PS1='\[\e[1;32m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0;33m\]$(parse_git_branch)\[\e[0m\]\$ '
+
+    # Aliases
+    alias ll='ls -alF'
+    alias gs='git status'
+    alias gd='git diff'
+    alias gl='git log --oneline -20'
+    alias dc='docker compose'
+    alias k='kubectl'
+
+    # ── Familiar aliases (PowerShell/CMD equivalents) ──
+    alias cls='clear'
+    alias dir='ls -la'
+    alias copy='cp'
+    alias move='mv'
+    alias del='rm'
+    alias type='cat'
+    alias md='mkdir -p'
+    alias rd='rmdir'
+    alias where='which'
+    alias findstr='grep'
+    alias notepad='nvim'
+
+    # Help command
+    board-help() {
+      echo '
+      Board Quick Reference
+      =====================
+
+      Health & Status
+        check              run all health checks
+        board-help         show this reference
+
+      Services
+        Ctrl+Shift+P in VS Code -> "Run Task" for project tasks, or:
+        systemctl --user restart <service>    restart a service
+        journalctl --user -u <service> -f     stream service logs
+
+      Git
+        gs                     git status
+        gd                     git diff
+        gl                     git log --oneline -20
+        git clone <url>        Clone a repo
+
+      Docker
+        dc up                  docker compose up
+        dc down                docker compose down
+        dc logs -f             Follow container logs
+        dc ps                  List running containers
+
+      Projects
+        ~/projects/        your project workspace
+
+      Need help? Message your shaper or check the docs.
+      '
+    }
+
+    # Docker: buildkit by default
+    export DOCKER_BUILDKIT=1
+    export COMPOSE_DOCKER_CLI_BUILD=1
+
+    cd ~/projects 2>/dev/null
+    BASHRC
 
   # ── Git default config ──
   - su - devuser -c "git config --global init.defaultBranch main"
