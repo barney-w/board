@@ -1,0 +1,14 @@
+{
+  "analyzers": {
+    "core": {
+      "rules": {
+        "no-unused-params": { "level": "error" },
+        "no-unused-vars": { "level": "error" },
+        "no-hardcoded-env-url": { "level": "error" },
+        "outputs-should-not-contain-secrets": { "level": "error" },
+        "admin-username-should-not-be-literal": { "level": "warning" },
+        "use-recent-api-versions": { "level": "warning" }
+      }
+    }
+  }
+}
