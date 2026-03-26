@@ -35,6 +35,9 @@ param allowedSshSourceIP string = '*'
 @description('Whether to attach a public IP to the VM')
 param enablePublicIp bool = true
 
+@description('Whether to allow direct HTTPS access (port 443) for browser IDE reverse proxy')
+param enableDirectHttps bool = false
+
 @description('Auto-shutdown time in HHmm format (local timezone)')
 param autoShutdownTime string = '1900'
 
@@ -110,6 +113,22 @@ var baseSecurityRules = [
   }
 ]
 
+var httpsRule = enableDirectHttps ? [
+  {
+    name: 'AllowHTTPSInbound'
+    properties: {
+      priority: 200
+      direction: 'Inbound'
+      access: 'Allow'
+      protocol: 'Tcp'
+      sourceAddressPrefix: allowedSshSourceIP
+      sourcePortRange: '*'
+      destinationAddressPrefix: '*'
+      destinationPortRange: '443'
+    }
+  }
+] : []
+
 // ── Module 1: NSG ──
 
 module nsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
@@ -118,7 +137,7 @@ module nsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
     name: 'nsg-${prefix}'
     location: location
     tags: commonTags
-    securityRules: baseSecurityRules
+    securityRules: concat(baseSecurityRules, httpsRule)
   }
 }
 

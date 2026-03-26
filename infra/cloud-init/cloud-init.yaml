@@ -175,6 +175,13 @@ write_files:
           echo "    dc down       -> docker compose down"
       fi
 
+      # Browser IDE access
+      echo ""
+      echo -e "${BOLD}Browser IDE Access${NC}"
+      echo ""
+      if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
+          echo "  code-server:    http://localhost:8080 (via SSH tunnel)"
+      fi
       echo ""
 
       # ── Signal completion (for VS Code extension first-run detection) ──
@@ -249,8 +256,11 @@ write_files:
       echo ""
       echo "  ${dim}check${reset}         run health checks"
       echo "  ${dim}board-help${reset}    show all commands"
+      # Browser IDE hints (only show if services are available)
+      if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
+          echo "  ${dim}code-server${reset}   ssh -L 8080:localhost:8080 $USER@$(hostname) then http://localhost:8080"
       fi
-      fi
+      if [[ -f /home/devuser/.board/tunnel-url ]]; then
       echo ""
       echo "  ${dim}board v1.0.0${reset}"
       echo ""
@@ -384,6 +394,32 @@ runcmd:
   - |
     wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     chmod +x /usr/local/bin/yq
+
+  # ── code-server (browser IDE) ──
+  - |
+    echo "[board] Installing code-server..."
+    export HOME=/root
+    CODESERVER_VERSION="4.96.4"
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --version "$CODESERVER_VERSION" 2>&1 || {
+      echo "[board] WARN: code-server install failed (non-fatal)"
+    }
+  - |
+    mkdir -p /home/devuser/.config/code-server
+    cat > /home/devuser/.config/code-server/config.yaml << CSCONF
+    bind-addr: 127.0.0.1:8080
+    auth: none
+    cert: false
+    CSCONF
+    chown -R devuser:devuser /home/devuser/.config/code-server
+    # Override systemd unit to open the projects directory by default
+    mkdir -p /etc/systemd/system/code-server@devuser.service.d
+    cat > /etc/systemd/system/code-server@devuser.service.d/default-folder.conf << OVERRIDE
+    [Service]
+    ExecStart=
+    ExecStart=/usr/bin/code-server --bind-addr 127.0.0.1:8080 /home/devuser/projects
+    OVERRIDE
+    systemctl daemon-reload
+  - 'systemctl enable --now code-server@devuser || echo "[board] WARN: code-server service failed to start (non-fatal)"'
 
   # ── Disable default Ubuntu MOTD noise, keep custom Board MOTD ──
   - chmod -x /etc/update-motd.d/*
