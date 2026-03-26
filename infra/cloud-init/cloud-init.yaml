@@ -157,23 +157,39 @@ write_files:
       # ── Step 4: Quick orientation ──
       echo -e "${BOLD}Step 4: Your Workspace${NC}"
       echo ""
-      echo "  Your project directory: ~/projects"
-      echo "  To clone a repo:        cd ~/projects && git clone <url>"
+      if [[ -f ~/projects/board.code-workspace ]]; then
+          echo "  Your projects are ready -- open board.code-workspace in VS Code"
+          echo "  Run 'check' any time to verify services are healthy"
+          echo ""
+          echo "  Useful commands:"
+          echo "    check         -> verify all services are running"
+          echo "    gs             -> git status"
+          echo "    dc up          -> docker compose up"
+      else
+          echo "  Your project directory: ~/projects"
+          echo "  To clone a repo:        cd ~/projects && git clone <url>"
+          echo ""
+          echo "  Useful commands:"
+          echo "    gs            -> git status"
+          echo "    dc up         -> docker compose up"
+          echo "    dc down       -> docker compose down"
+      fi
+
       echo ""
-      echo "  Useful commands:"
-      echo "    gs            -> git status"
-      echo "    dc up         -> docker compose up"
-      echo "    dc down       -> docker compose down"
 
       # ── Signal completion (for VS Code extension first-run detection) ──
       touch ~/.setup-me-complete
 
       # ── Done ──
-      echo ""
       echo -e "${BLUE}${BOLD}╭───────────────────────────────────────────────╮${NC}"
-      echo -e "${BLUE}${BOLD}│  Setup complete. You're ready to code.        │${NC}"
-      echo -e "${BLUE}${BOLD}│                                               │${NC}"
-      echo -e "${BLUE}${BOLD}│  Next: cd ~/projects && git clone <your-repo> │${NC}"
+      if [[ -f ~/projects/board.code-workspace ]]; then
+          echo -e "${BLUE}${BOLD}│  Setup complete. Open board.code-workspace   │${NC}"
+          echo -e "${BLUE}${BOLD}│  in VS Code to start coding.                 │${NC}"
+      else
+          echo -e "${BLUE}${BOLD}│  Setup complete. You're ready to code.        │${NC}"
+          echo -e "${BLUE}${BOLD}│                                               │${NC}"
+          echo -e "${BLUE}${BOLD}│  Next: cd ~/projects && git clone <your-repo> │${NC}"
+      fi
       echo -e "${BLUE}${BOLD}╰───────────────────────────────────────────────╯${NC}"
       echo ""
 
@@ -233,6 +249,8 @@ write_files:
       echo ""
       echo "  ${dim}check${reset}         run health checks"
       echo "  ${dim}board-help${reset}    show all commands"
+      fi
+      fi
       echo ""
       echo "  ${dim}board v1.0.0${reset}"
       echo ""
@@ -246,6 +264,61 @@ write_files:
       BOARD_NAME="board"
       BOARD_REGION=""
       BOARD_SIZE=""
+
+  - path: /home/devuser/.board/is-idle.sh
+    owner: devuser:devuser
+    permissions: "0755"
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      # Board idle detection — exits 0 if idle, 1 if active
+      # Used by auto-shutdown (future) to avoid shutting down during active work
+
+      is_active_ssh() {
+          # Check for active SSH sessions (pts = pseudo terminal = SSH)
+          who | grep -q "pts/"
+      }
+
+      is_active_codeserver() {
+          # Check for established WebSocket connections to code-server
+          ss -tn state established '( dport = :8080 )' 2>/dev/null | grep -q ESTAB
+      }
+
+      is_active_tunnel() {
+          # Check if a VS Code Tunnel client is connected
+          # The tunnel service status includes connection timestamps
+          systemctl --user is-active --quiet code-tunnel 2>/dev/null && \
+              /usr/local/bin/code tunnel status 2>&1 | grep -q "last_connected_at"
+      }
+
+      if is_active_ssh || is_active_codeserver || is_active_tunnel; then
+          exit 1  # Active — do not shut down
+      fi
+      exit 0  # Idle — safe to shut down
+
+  - path: /home/devuser/.config/systemd/user/board-check.service
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      [Unit]
+      Description=Board health check (cache refresh)
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/bash /home/devuser/projects/.board/check.sh
+
+  - path: /home/devuser/.config/systemd/user/board-check.timer
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      [Unit]
+      Description=Run board health check every 10 minutes
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=10min
+      [Install]
+      WantedBy=timers.target
 
 runcmd:
   # ── Fix ownership of home directory and subdirectories ──
@@ -552,6 +625,9 @@ runcmd:
   - su - devuser -c "git config --global pull.rebase true"
   - su - devuser -c "git config --global core.editor nvim"
   - su - devuser -c "git config --global push.autoSetupRemote true"
+
+  # ── Enable board health check timer ──
+  - su - devuser -c "mkdir -p ~/.config/systemd/user && systemctl --user daemon-reload && systemctl --user enable --now board-check.timer" || true
 
   # ── Signal completion ──
   - touch /home/devuser/.cloud-init-complete
