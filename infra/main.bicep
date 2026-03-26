@@ -53,6 +53,9 @@ param adminUsername string = 'devuser'
 @description('Whether to install Entra ID SSH login extension')
 param useEntraIdLogin bool = false
 
+@description('Resource ID of Key Vault for project secrets (empty = skip)')
+param keyVaultResourceId string = ''
+
 @description('Subnet CIDR range')
 param subnetAddressPrefix string = '10.0.1.0/24'
 
@@ -256,6 +259,17 @@ module autoShutdown './modules/auto-shutdown.bicep' = {
     enableNotification: enableAutoShutdownNotification
     notificationEmail: autoShutdownNotificationEmail
     tags: commonTags
+  }
+}
+
+// ── Module 6: Key Vault Secrets User role (conditional) ──
+
+module kvRole './modules/keyvault-role.bicep' = if (keyVaultResourceId != '') {
+  name: 'kv-role-assignment'
+  scope: resourceGroup(split(keyVaultResourceId, '/')[2], split(keyVaultResourceId, '/')[4])
+  params: {
+    keyVaultName: last(split(keyVaultResourceId, '/'))
+    principalId: vm.outputs.?systemAssignedMIPrincipalId ?? ''
   }
 }
 
