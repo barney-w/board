@@ -179,6 +179,10 @@ write_files:
       echo ""
       echo -e "${BOLD}Browser IDE Access${NC}"
       echo ""
+      if [[ -f ~/.board/tunnel-url ]]; then
+          echo -e "  VS Code Tunnel: ${GREEN}$(cat ~/.board/tunnel-url)${NC}"
+          echo "    Open this URL in any browser. Sign in with GitHub."
+      fi
       if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
           echo "  code-server:    http://localhost:8080 (via SSH tunnel)"
       fi
@@ -261,6 +265,8 @@ write_files:
           echo "  ${dim}code-server${reset}   ssh -L 8080:localhost:8080 $USER@$(hostname) then http://localhost:8080"
       fi
       if [[ -f /home/devuser/.board/tunnel-url ]]; then
+          echo "  ${dim}tunnel${reset}        $(cat /home/devuser/.board/tunnel-url)"
+      fi
       echo ""
       echo "  ${dim}board v1.0.0${reset}"
       echo ""
@@ -420,6 +426,24 @@ runcmd:
     OVERRIDE
     systemctl daemon-reload
   - 'systemctl enable --now code-server@devuser || echo "[board] WARN: code-server service failed to start (non-fatal)"'
+
+  # ── VS Code CLI (for tunnels) ──
+  - |
+    ARCH=$(dpkg --print-architecture)
+    case "$ARCH" in
+      amd64) CLI_PLATFORM="cli-linux-x64" ;;
+      arm64) CLI_PLATFORM="cli-linux-arm64" ;;
+      *)     echo "[board] WARN: Unsupported arch for VS Code CLI: $ARCH"; exit 0 ;;
+    esac
+    echo "[board] Installing VS Code CLI (${CLI_PLATFORM})..."
+    curl -fsSL "https://update.code.visualstudio.com/latest/${CLI_PLATFORM}/stable" \
+      --output /tmp/vscode_cli.tar.gz && \
+    tar -xf /tmp/vscode_cli.tar.gz -C /usr/local/bin/ && \
+    rm -f /tmp/vscode_cli.tar.gz && \
+    chmod +x /usr/local/bin/code && \
+    echo "[board] VS Code CLI installed: $(/usr/local/bin/code version 2>/dev/null || echo 'unknown')" || {
+      echo "[board] WARN: VS Code CLI install failed (non-fatal)"
+    }
 
   # ── Disable default Ubuntu MOTD noise, keep custom Board MOTD ──
   - chmod -x /etc/update-motd.d/*
