@@ -1,0 +1,149 @@
+# projects/examples/django-api.project.yaml
+
+name: django-api
+description: Django REST API (Python/uv + Postgres + Redis + Celery)
+repo: https://github.com/your-org/django-api
+path: ~/projects/django-api
+
+# ── System requirements (validated before provisioning) ──
+requires:
+  tools: [python3, uv, docker]
+  cloud_init: true
+
+# ── Dependency installation (idempotent commands) ──
+install:
+  - label: Install Python dependencies
+    run: uv sync
+  - label: Collect static files
+    run: uv run python manage.py collectstatic --noinput
+
+# ── Docker services (managed via docker compose) ──
+docker:
+  compose_file: docker-compose.yml
+  containers:
+    - name: django-postgres
+      restart_policy: unless-stopped
+      health_cmd: pg_isready -U django -d django
+      health_interval: 2
+      health_timeout: 60
+    - name: django-redis
+      restart_policy: unless-stopped
+      health_cmd: redis-cli ping
+      health_interval: 2
+      health_timeout: 30
+
+# ── Post-docker setup (runs after containers are healthy) ──
+post_docker:
+  - label: Run database migrations
+    run: uv run python manage.py migrate --noinput
+  - label: Create superuser if missing
+    run: uv run python manage.py createsuperuser --noinput 2>/dev/null || true
+
+# ── Long-running app services (systemd user units) ──
+services:
+  - name: django-api
+    description: Django API server
+    exec: .venv/bin/uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
+    working_dir: .
+    env_file: .env
+    extra_path: .venv/bin
+    health_url: http://localhost:8000/api/health/
+    health_timeout: 15
+  - name: django-celery
+    description: Celery worker
+    exec: .venv/bin/celery -A config worker --loglevel=info --concurrency=2
+    working_dir: .
+    env_file: .env
+    extra_path: .venv/bin
+  - name: django-celery-beat
+    description: Celery beat scheduler
+    exec: .venv/bin/celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    working_dir: .
+    env_file: .env
+    extra_path: .venv/bin
+
+# ── Environment variables ──
+env:
+  file: .env
+  fallback: .env.example
+
+  keyvault_secrets:
+    DJANGO_SECRET_KEY: django-secret-key
+    SENTRY_DSN: sentry-dsn
+
+  hardcoded:
+    DATABASE_URL: postgres://django:localdev@localhost:5432/django
+    REDIS_URL: redis://localhost:6379/0
+    CELERY_BROKER_URL: redis://localhost:6379/1
+    DJANGO_SETTINGS_MODULE: config.settings.local
+    DJANGO_DEBUG: "true"
+    DJANGO_ALLOWED_HOSTS: "*"
+    DJANGO_SUPERUSER_USERNAME: admin
+    DJANGO_SUPERUSER_EMAIL: admin@localhost
+    DJANGO_SUPERUSER_PASSWORD: localdev
+
+  required:
+    - DJANGO_SECRET_KEY
+
+# ── VS Code integration ──
+vscode:
+  ports:
+    "8000": { label: "Django API", auto_forward: notify }
+    "5432": { label: "Postgres", auto_forward: silent }
+    "6379": { label: "Redis", auto_forward: silent }
+
+  tasks:
+    - label: Restart API
+      command: systemctl --user restart django-api && echo 'API restarted'
+    - label: View API Logs
+      command: journalctl --user -u django-api -f --no-hostname -o cat
+      background: true
+    - label: View Celery Logs
+      command: journalctl --user -u django-celery -f --no-hostname -o cat
+      background: true
+    - label: Run Migrations
+      command: uv run python manage.py migrate
+    - label: Django Shell
+      command: uv run python manage.py shell_plus
+    - label: Health Check
+      command: check
+    - label: Postgres Shell
+      command: docker exec -it django-postgres psql -U django -d django
+    - label: Stop API Service
+      command: systemctl --user stop django-api && echo 'API stopped (port 8000 free for debugger)'
+
+  launch:
+    - name: Debug Django API
+      type: debugpy
+      request: launch
+      module: uvicorn
+      args: ["config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      cwd: .
+      env_file: .env
+      pre_launch_task: Stop API Service
+    - name: Debug Celery Worker
+      type: debugpy
+      request: launch
+      module: celery
+      args: ["-A", "config", "worker", "--loglevel=info", "--concurrency=1"]
+      cwd: .
+      env_file: .env
+
+  settings:
+    python.defaultInterpreterPath: ./.venv/bin/python
+
+# ── Health checks (used by `check` command and smoke tests) ──
+health:
+  - label: Postgres
+    check: docker exec django-postgres pg_isready -U django -d django
+    port: 5432
+  - label: Redis
+    check: docker exec django-redis redis-cli ping | grep -q PONG
+    port: 6379
+  - label: Django API
+    check: curl -sf http://localhost:8000/api/health/
+    port: 8000
+  - label: Celery worker
+    check: systemctl --user is-active django-celery
+  - label: Django migrations
+    check: uv run python manage.py migrate --check 2>/dev/null

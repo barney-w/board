@@ -1,0 +1,132 @@
+# projects/examples/rails-app.project.yaml
+
+name: rails-app
+description: Rails application (Ruby/Bundler + Postgres + Redis + Sidekiq)
+repo: https://github.com/your-org/rails-app
+path: ~/projects/rails-app
+
+# ── System requirements (validated before provisioning) ──
+requires:
+  tools: [ruby, bundler, docker]
+  cloud_init: true
+
+# ── Dependency installation (idempotent commands) ──
+install:
+  - label: Install Ruby dependencies
+    run: bundle install
+  - label: Install JavaScript dependencies
+    run: bin/rails javascript:install:esbuild 2>/dev/null || true
+  - label: Precompile assets
+    run: bin/rails assets:precompile
+
+# ── Docker services (managed via docker compose) ──
+docker:
+  compose_file: docker-compose.yml
+  containers:
+    - name: rails-postgres
+      restart_policy: unless-stopped
+      health_cmd: pg_isready -U rails -d rails_dev
+      health_interval: 2
+      health_timeout: 60
+    - name: rails-redis
+      restart_policy: unless-stopped
+      health_cmd: redis-cli ping
+      health_interval: 2
+      health_timeout: 30
+
+# ── Post-docker setup (runs after containers are healthy) ──
+post_docker:
+  - label: Create and migrate database
+    run: bin/rails db:prepare
+  - label: Seed database
+    run: bin/rails db:seed
+
+# ── Long-running app services (systemd user units) ──
+services:
+  - name: rails-server
+    description: Rails development server
+    exec: bin/rails server -b 0.0.0.0 -p 3000
+    working_dir: .
+    env_file: .env
+    health_url: http://localhost:3000/up
+    health_timeout: 20
+  - name: rails-sidekiq
+    description: Sidekiq background worker
+    exec: bundle exec sidekiq -C config/sidekiq.yml
+    working_dir: .
+    env_file: .env
+
+# ── Environment variables ──
+env:
+  file: .env
+  fallback: .env.example
+
+  keyvault_secrets:
+    RAILS_MASTER_KEY: rails-master-key
+    STRIPE_API_KEY: stripe-api-key
+
+  hardcoded:
+    DATABASE_URL: postgres://rails:localdev@localhost:5432/rails_dev
+    REDIS_URL: redis://localhost:6379/0
+    RAILS_ENV: development
+    RAILS_LOG_LEVEL: debug
+    RAILS_SERVE_STATIC_FILES: "true"
+    PIDFILE: tmp/pids/server.pid
+
+  required:
+    - RAILS_MASTER_KEY
+
+# ── VS Code integration ──
+vscode:
+  ports:
+    "3000": { label: "Rails App", auto_forward: notify }
+    "5432": { label: "Postgres", auto_forward: silent }
+    "6379": { label: "Redis", auto_forward: silent }
+
+  tasks:
+    - label: Restart Server
+      command: systemctl --user restart rails-server && echo 'Rails restarted'
+    - label: View Server Logs
+      command: journalctl --user -u rails-server -f --no-hostname -o cat
+      background: true
+    - label: View Sidekiq Logs
+      command: journalctl --user -u rails-sidekiq -f --no-hostname -o cat
+      background: true
+    - label: Run Migrations
+      command: bin/rails db:migrate
+    - label: Rails Console
+      command: bin/rails console
+    - label: Health Check
+      command: check
+    - label: Postgres Shell
+      command: docker exec -it rails-postgres psql -U rails -d rails_dev
+    - label: Stop Server
+      command: systemctl --user stop rails-server && echo 'Server stopped (port 3000 free for debugger)'
+
+  launch:
+    - name: Debug Rails Server
+      type: rdbg
+      request: launch
+      command: bin/rails server -b 0.0.0.0 -p 3000
+      cwd: .
+      env_file: .env
+      pre_launch_task: Stop Server
+
+  settings:
+    ruby.lsp.enabled: true
+
+# ── Health checks (used by `check` command and smoke tests) ──
+health:
+  - label: Postgres
+    check: docker exec rails-postgres pg_isready -U rails -d rails_dev
+    port: 5432
+  - label: Redis
+    check: docker exec rails-redis redis-cli ping | grep -q PONG
+    port: 6379
+  - label: Rails App
+    check: curl -sf http://localhost:3000/up
+    port: 3000
+  - label: Sidekiq
+    check: systemctl --user is-active rails-sidekiq
+  - label: Database migrations
+    check: bin/rails db:migrate:status 2>&1 | grep -qv "down"

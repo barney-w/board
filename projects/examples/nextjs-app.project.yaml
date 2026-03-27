@@ -1,0 +1,114 @@
+# projects/examples/nextjs-app.project.yaml
+
+name: nextjs-app
+description: Next.js starter app (Node.js/pnpm + Postgres)
+repo: https://github.com/your-org/nextjs-app
+path: ~/projects/nextjs-app
+
+# ── System requirements (validated before provisioning) ──
+requires:
+  tools: [node, pnpm, docker]
+  cloud_init: true
+
+# ── Dependency installation (idempotent commands) ──
+install:
+  - label: Install dependencies
+    run: pnpm install
+  - label: Generate Prisma client
+    run: pnpm exec prisma generate
+
+# ── Docker services (managed via docker compose) ──
+docker:
+  compose_file: docker-compose.yml
+  containers:
+    - name: nextjs-postgres
+      restart_policy: unless-stopped
+      health_cmd: pg_isready -U nextjs -d nextjs
+      health_interval: 2
+      health_timeout: 60
+
+# ── Post-docker setup (runs after containers are healthy) ──
+post_docker:
+  - label: Run database migrations
+    run: pnpm exec prisma migrate deploy
+  - label: Seed database
+    run: pnpm exec prisma db seed
+
+# ── Long-running app services (systemd user units) ──
+services:
+  - name: nextjs-dev
+    description: Next.js development server
+    exec: node_modules/.bin/next dev --port 3000
+    working_dir: .
+    env_file: .env.local
+    health_url: http://localhost:3000/api/health
+    health_timeout: 20
+
+# ── Environment variables ──
+env:
+  file: .env.local
+  fallback: .env.example
+
+  keyvault_secrets:
+    NEXTAUTH_SECRET: nextauth-secret
+    STRIPE_SECRET_KEY: stripe-secret-key
+
+  hardcoded:
+    DATABASE_URL: postgresql://nextjs:localdev@localhost:5432/nextjs
+    NEXTAUTH_URL: http://localhost:3000
+    NODE_ENV: development
+
+  required:
+    - DATABASE_URL
+
+# ── VS Code integration ──
+vscode:
+  ports:
+    "3000": { label: "Next.js App", auto_forward: notify }
+    "5432": { label: "Postgres", auto_forward: silent }
+
+  tasks:
+    - label: Dev Server
+      command: pnpm dev
+      background: true
+    - label: Build
+      command: pnpm build
+      group: build
+    - label: Lint
+      command: pnpm lint
+    - label: Type Check
+      command: pnpm exec tsc --noEmit
+    - label: Prisma Studio
+      command: pnpm exec prisma studio
+      background: true
+    - label: Health Check
+      command: check
+    - label: Postgres Shell
+      command: docker exec -it nextjs-postgres psql -U nextjs -d nextjs
+
+  launch:
+    - name: Debug Next.js (Server)
+      type: node
+      request: launch
+      runtimeExecutable: pnpm
+      runtimeArgs: ["dev"]
+      cwd: .
+      env_file: .env.local
+    - name: Debug Next.js (Chrome)
+      type: chrome
+      request: launch
+      url: http://localhost:3000
+
+  settings:
+    typescript.tsdk: ./node_modules/typescript/lib
+
+# ── Health checks (used by `check` command and smoke tests) ──
+health:
+  - label: Postgres
+    check: docker exec nextjs-postgres pg_isready -U nextjs -d nextjs
+    port: 5432
+  - label: Next.js App
+    check: curl -sf http://localhost:3000/api/health
+    port: 3000
+  - label: Prisma migrations
+    check: pnpm exec prisma migrate status 2>&1 | grep -q "applied"

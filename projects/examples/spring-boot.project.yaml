@@ -1,0 +1,119 @@
+# projects/examples/spring-boot.project.yaml
+
+name: spring-boot
+description: Spring Boot API (Java 21 + Gradle + Postgres)
+repo: https://github.com/your-org/spring-boot
+path: ~/projects/spring-boot
+
+# ── System requirements (validated before provisioning) ──
+requires:
+  tools: [java, gradle, docker]
+  cloud_init: true
+
+# ── Dependency installation (idempotent commands) ──
+install:
+  - label: Download Gradle dependencies
+    run: ./gradlew dependencies --no-daemon
+  - label: Build project
+    run: ./gradlew build -x test --no-daemon
+
+# ── Docker services (managed via docker compose) ──
+docker:
+  compose_file: docker-compose.yml
+  containers:
+    - name: spring-postgres
+      restart_policy: unless-stopped
+      health_cmd: pg_isready -U spring -d spring
+      health_interval: 2
+      health_timeout: 60
+
+# ── Post-docker setup (runs after containers are healthy) ──
+post_docker:
+  - label: Run Flyway migrations
+    run: ./gradlew flywayMigrate --no-daemon
+
+# ── Long-running app services (systemd user units) ──
+services:
+  - name: spring-boot-api
+    description: Spring Boot API server
+    exec: java -jar build/libs/app.jar --server.port=8080
+    working_dir: .
+    env_file: .env
+    health_url: http://localhost:8080/actuator/health
+    health_timeout: 30
+
+# ── Environment variables ──
+env:
+  file: .env
+  fallback: .env.example
+
+  keyvault_secrets:
+    SPRING_DATASOURCE_PASSWORD: spring-db-password
+    JWT_SECRET: jwt-secret
+
+  hardcoded:
+    SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/spring
+    SPRING_DATASOURCE_USERNAME: spring
+    SPRING_PROFILES_ACTIVE: local
+    SERVER_PORT: "8080"
+    MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics
+    MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: always
+    LOGGING_LEVEL_ROOT: INFO
+    LOGGING_LEVEL_COM_YOURORG: DEBUG
+    JAVA_TOOL_OPTIONS: "-XX:+UseZGC -Xmx512m"
+
+  required:
+    - SPRING_DATASOURCE_URL
+    - SPRING_DATASOURCE_USERNAME
+
+# ── VS Code integration ──
+vscode:
+  ports:
+    "8080": { label: "Spring Boot API", auto_forward: notify }
+    "5432": { label: "Postgres", auto_forward: silent }
+    "5005": { label: "Debug Port", auto_forward: silent }
+
+  tasks:
+    - label: Build
+      command: ./gradlew build -x test --no-daemon
+      group: build
+    - label: Restart API
+      command: ./gradlew build -x test --no-daemon && systemctl --user restart spring-boot-api && echo 'API rebuilt and restarted'
+    - label: View Logs
+      command: journalctl --user -u spring-boot-api -f --no-hostname -o cat
+      background: true
+    - label: Run Tests
+      command: ./gradlew test --no-daemon
+    - label: Run Migrations
+      command: ./gradlew flywayMigrate --no-daemon
+    - label: Health Check
+      command: check
+    - label: Postgres Shell
+      command: docker exec -it spring-postgres psql -U spring -d spring
+    - label: Stop API
+      command: systemctl --user stop spring-boot-api && echo 'API stopped (port 8080 free for debugger)'
+
+  launch:
+    - name: Debug Spring Boot API
+      type: java
+      request: launch
+      mainClass: com.yourorg.Application
+      projectName: app
+      vmArgs: "-Dspring.profiles.active=local"
+      envFile: .env
+      pre_launch_task: Stop API
+
+  settings:
+    java.configuration.updateBuildConfiguration: automatic
+    java.compile.nullAnalysis.mode: automatic
+
+# ── Health checks (used by `check` command and smoke tests) ──
+health:
+  - label: Postgres
+    check: docker exec spring-postgres pg_isready -U spring -d spring
+    port: 5432
+  - label: Spring Boot API
+    check: curl -sf http://localhost:8080/actuator/health | grep -q '"UP"'
+    port: 8080
+  - label: Flyway migrations
+    check: curl -sf http://localhost:8080/actuator/flyway | grep -q '"state":"SUCCESS"'
