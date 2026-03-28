@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { getConfig, isConfigured, getSshHostAlias, getPortalUrl } from './config';
+import { getConfig, isConfigured, getSshHostAlias, getPortalUrl, getTunnelUrl } from './config';
 import { writeSshConfig } from './ssh';
 import { connect } from './connection';
 import { importBundle } from './bundle';
 import { StatusBar } from './statusBar';
+import { BoardTerminalProfileProvider, openWorkspaceTerminals } from './terminal';
 import { isAzCliAvailable, startVm, stopVm } from './azure';
 import { PollingService } from './polling';
 import { VmStatusProvider, QuickActionsProvider } from './sidebar';
@@ -234,6 +235,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // ---- board.openWorkspace ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openWorkspace', async () => {
+      await openWorkspaceTerminals();
+    }),
+  );
+
   // ---- Azure CLI availability check (async, non-blocking) ----
   const azCliInstallUrl = 'https://aka.ms/installazurecli';
 
@@ -360,10 +368,125 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // ---- board.openTunnel ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openTunnel', () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage('Configure Board first.');
+        return;
+      }
+      const config = getConfig();
+      const url = getTunnelUrl(config);
+      if (!url) {
+        vscode.window.showWarningMessage('No tunnel URL configured.');
+        return;
+      }
+      vscode.env.openExternal(vscode.Uri.parse(url));
+    }),
+  );
+
+  // ---- board.openCodeServer ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openCodeServer', async () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage('Configure Board first.');
+        return;
+      }
+      const config = getConfig();
+      const hostAlias = getSshHostAlias(config);
+
+      // Open SSH tunnel in a terminal
+      const terminal = vscode.window.createTerminal({
+        name: 'code-server tunnel',
+        shellPath: 'ssh',
+        shellArgs: ['-L', '8080:localhost:8080', '-N', hostAlias],
+        iconPath: new vscode.ThemeIcon('globe'),
+      });
+      terminal.show();
+
+      // Wait briefly for tunnel to establish, then open browser
+      setTimeout(() => {
+        vscode.env.openExternal(vscode.Uri.parse('http://localhost:8080'));
+      }, 2000);
+
+      // No password needed — code-server uses auth:none (SSH tunnel is the auth)
+    }),
+  );
+
+  // ---- board.openInBrowser ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openInBrowser', async () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage('Configure Board first.');
+        return;
+      }
+      const config = getConfig();
+      const tunnelUrl = getTunnelUrl(config);
+
+      const items: vscode.QuickPickItem[] = [];
+      if (tunnelUrl) {
+        items.push({
+          label: '$(globe) VS Code Tunnel',
+          description: 'Full marketplace, Copilot, GitHub auth',
+          detail: tunnelUrl,
+        });
+      }
+      items.push({
+        label: '$(terminal) code-server',
+        description: 'Self-hosted, Open VSX, no login required',
+        detail: 'Opens SSH tunnel + http://localhost:8080',
+      });
+
+      if (items.length === 1) {
+        // Only code-server available (no tunnel URL)
+        await vscode.commands.executeCommand('board.openCodeServer');
+        return;
+      }
+
+      const choice = await vscode.window.showQuickPick(items, {
+        title: 'Open in Browser',
+        placeHolder: 'Choose a browser IDE',
+      });
+
+      if (!choice) {
+        return;
+      }
+
+      if (choice.label.includes('Tunnel')) {
+        await vscode.commands.executeCommand('board.openTunnel');
+      } else {
+        await vscode.commands.executeCommand('board.openCodeServer');
+      }
+    }),
+  );
+
+  // ---- Terminal profile provider ----
+  const terminalProvider = new BoardTerminalProfileProvider();
+  context.subscriptions.push(
+    vscode.window.registerTerminalProfileProvider(
+      'board.terminalProfile',
+      terminalProvider,
+    ),
+  );
+
   // ---- Show welcome panel for first-time users ----
   const config = getConfig();
   if (!config.developerName) {
     showWelcomePanel(context);
+  }
+
+  // ---- Auto-open workspace terminals when in a remote SSH session ----
+  if (
+    vscode.env.remoteName === 'ssh-remote' &&
+    isConfigured() &&
+    config.autoOpenTerminals
+  ) {
+    // Delay to let the remote window settle before opening terminals
+    setTimeout(() => {
+      openWorkspaceTerminals().catch((err) => {
+        console.error('[Board] Failed to open workspace terminals:', err);
+      });
+    }, 3000);
   }
 
   outputChannel.appendLine('Board extension activated');
