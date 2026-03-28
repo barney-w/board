@@ -12,6 +12,10 @@
     "type": "git",
     "url": "https://github.com/barney-w/board"
   },
+  "galleryBanner": {
+    "color": "#0ea5e9",
+    "theme": "dark"
+  },
   "activationEvents": ["onStartupFinished", "onLanguage:board-pass", "onCommand:board.importPass", "onCommand:board.configure"],
   "main": "./dist/extension.js",
   "contributes": {
@@ -24,6 +28,9 @@
       { "command": "board.runSetup", "title": "Board: Run First-Time Setup" },
       { "command": "board.openPortal", "title": "Board: Open in Azure Portal" },
       { "command": "board.openTerminal", "title": "Board: Open Terminal" },
+      { "command": "board.openInBrowser", "title": "Board: Open in Browser", "icon": "$(globe)" },
+      { "command": "board.openCodeServer", "title": "Board: Open code-server" },
+      { "command": "board.openTunnel", "title": "Board: Open VS Code Tunnel" },
       { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" }
     ],
     "configuration": {
