@@ -6,8 +6,13 @@
   "publisher": "barney-w",
   "license": "MIT",
   "engines": { "vscode": "^1.96.0" },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": ["Other", "SCM Providers"],
+  "keywords": ["board", "cloud", "development", "environment", "ssh", "azure", "vm"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/barney-w/board"
+  },
+  "activationEvents": ["onStartupFinished", "onLanguage:board-pass", "onCommand:board.importPass", "onCommand:board.configure"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -15,7 +20,11 @@
       { "command": "board.connect", "title": "Board: Connect", "icon": "$(remote)" },
       { "command": "board.start", "title": "Board: Start" },
       { "command": "board.stop", "title": "Board: Stop" },
-      { "command": "board.importPass", "title": "Board: Import Pass" }
+      { "command": "board.importPass", "title": "Board: Import Pass" },
+      { "command": "board.runSetup", "title": "Board: Run First-Time Setup" },
+      { "command": "board.openPortal", "title": "Board: Open in Azure Portal" },
+      { "command": "board.openTerminal", "title": "Board: Open Terminal" },
+      { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" }
     ],
     "configuration": {
       "title": "Board",
@@ -46,6 +55,10 @@
           "type": "string",
           "default": "ssh-key",
           "enum": ["ssh-key", "entra-id"],
+          "enumDescriptions": [
+            "Authenticate with an SSH key (personal tenant)",
+            "Authenticate with Microsoft Entra ID (work tenant)"
+          ],
           "description": "SSH authentication method"
         },
         "board.autoStartVm": {
@@ -53,14 +66,92 @@
           "default": true,
           "description": "Automatically start the VM when connecting if it is stopped"
         },
+        "board.autoOpenTerminals": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-open Terminal + Copilot split panes when connecting"
+        },
         "board.pollIntervalSeconds": {
           "type": "number",
           "default": 60,
           "minimum": 10,
           "maximum": 600,
           "description": "How often to poll VM status (seconds)"
+        },
+        "board.tunnelUrl": {
+          "type": "string",
+          "default": "",
+          "description": "VS Code Tunnel URL for browser access (auto-populated from board pass)"
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "board",
+          "title": "Board",
+          "icon": "resources/board-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "board": [
+        { "id": "board.vmStatus", "name": "Board Status" },
+        { "id": "board.quickActions", "name": "Quick Actions" }
+      ]
+    },
+    "walkthroughs": [
+      {
+        "id": "board.getStarted",
+        "title": "Get Started with Board",
+        "description": "Connect to your Board cloud dev environment in under 2 minutes",
+        "steps": [
+          {
+            "id": "board.getStarted.import",
+            "title": "Import your board pass",
+            "description": "Your admin sent you a `.board-pass` file and a passphrase. Click Import to get connected.\n\n[Import Pass](command:board.importPass)\n\n_Admin? [Configure manually](command:board.configure) instead._",
+            "media": { "markdown": "resources/walkthrough/import.md" }
+          },
+          {
+            "id": "board.getStarted.connect",
+            "title": "Connect to your VM",
+            "description": "One click to start coding.\n\n[Connect](command:board.connect)",
+            "media": { "markdown": "resources/walkthrough/connect.md" }
+          },
+          {
+            "id": "board.getStarted.setup",
+            "title": "Run first-time setup",
+            "description": "Set up your Git identity and SSH keys on the VM.\n\n[Run Setup](command:board.runSetup)",
+            "media": { "markdown": "resources/walkthrough/setup.md" }
+          },
+          {
+            "id": "board.getStarted.project",
+            "title": "Open a project",
+            "description": "Your VM has a sample project ready at ~/projects/hello-board",
+            "media": { "markdown": "resources/walkthrough/project.md" }
+          }
+        ]
+      }
+    ],
+    "languages": [
+      {
+        "id": "board-pass",
+        "extensions": [".board-pass"],
+        "aliases": ["Board Pass"],
+        "icon": {
+          "light": "resources/board-pass-icon.svg",
+          "dark": "resources/board-pass-icon.svg"
+        }
+      }
+    ],
+    "terminal": {
+      "profiles": [
+        {
+          "id": "board.terminalProfile",
+          "title": "Board",
+          "icon": "vm-running"
+        }
+      ]
     }
   },
   "scripts": {
@@ -68,13 +159,17 @@
     "watch": "tsc -watch -p ./",
     "build": "node esbuild.config.js",
     "build:prod": "node esbuild.config.js --production",
-    "package": "npx @vscode/vsce package --no-dependencies"
+    "package": "npx @vscode/vsce package --no-dependencies",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
   }
 }
