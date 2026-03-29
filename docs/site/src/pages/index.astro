@@ -1,0 +1,177 @@
+---
+import '../styles/landing.css';
+import WaveLogo from '../components/WaveLogo.astro';
+import TerminalDemo from '../components/TerminalDemo.astro';
+---
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Board — Dev environments that just work</title>
+  <meta name="description" content="Dev environments that just work. Defined in YAML, running in the cloud. Same tools, same config, every developer, every time." />
+  <link rel="icon" type="image/svg+xml" href="/board/favicon.svg" />
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero-section">
+    <div class="hero-logo">
+      <WaveLogo size={48} />
+    </div>
+    <h1>Board</h1>
+    <p class="hero-tagline">Dev environments that just work.</p>
+    <div class="hero-buttons">
+      <a href="#quickstart" class="btn-primary">Get Started</a>
+      <a href="#showcase" class="btn-secondary">See How</a>
+    </div>
+    <div class="wave-container">
+      <svg viewBox="0 0 1200 60" preserveAspectRatio="none">
+        <path d="M0 30 Q150 0 300 30 Q450 60 600 30 Q750 0 900 30 Q1050 60 1200 30 V60 H0 Z"
+              fill="currentColor" opacity="0.15" style="color: #0ea5e9;" />
+        <path d="M0 40 Q150 10 300 40 Q450 70 600 40 Q750 10 900 40 Q1050 70 1200 40 V60 H0 Z"
+              fill="#ffffff" />
+      </svg>
+    </div>
+  </section>
+
+  <!-- Showcase: What Developers See / What You Run -->
+  <section class="showcase-section" id="showcase">
+    <div class="showcase-item">
+      <p class="showcase-label">WHAT DEVELOPERS SEE</p>
+      <div class="showcase-graphic">
+        <img src="/board/vscode-extension.svg" alt="Board VS Code Extension — Import Pass, Connect, Health Check" width="680" />
+      </div>
+    </div>
+    <div class="showcase-item">
+      <p class="showcase-label">WHAT YOU RUN</p>
+      <div class="showcase-graphic">
+        <img src="/board/typing-demo.svg" alt="Board workflow — just board, export-pass, check" width="680" />
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="how-section">
+    <h2 style="text-align: center;">How it works</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="step-number">1</div>
+        <h3>Provision</h3>
+        <p>
+          Run <code>just board</code>. An interactive wizard spins up an Azure
+          VM with your tools, repos, Docker services, and health checks —
+          all verified before you touch it.
+        </p>
+      </div>
+      <div class="how-card">
+        <div class="step-number">2</div>
+        <h3>Hand off</h3>
+        <p>
+          Export an encrypted board pass. One file bundles SSH keys, host
+          config, and project metadata. Share it over Slack, email, whatever.
+        </p>
+      </div>
+      <div class="how-card">
+        <div class="step-number">3</div>
+        <h3>Code</h3>
+        <p>
+          The developer imports the pass in VS Code and clicks Connect.
+          Ports forwarded, workspace configured, services running.
+          They're coding.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demo (asciinema) -->
+  <section class="demo-section" id="demo">
+    <h2 style="text-align: center;">Watch it work</h2>
+    <p style="text-align: center; color: var(--board-slate-400); max-width: 600px; margin: 0 auto 1.5rem;">
+      A real recording of <code>just board</code> provisioning a cloud environment — text is selectable, not a GIF.
+    </p>
+    <TerminalDemo />
+  </section>
+
+  <!-- Features -->
+  <section class="features-section">
+    <h2 style="text-align: center;">What you get</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <h4>Consistent environments</h4>
+        <p>Same manifest, same VM, same tools. No drift between developers. No "works on my machine."</p>
+      </div>
+      <div class="feature-card">
+        <h4>Full VM power</h4>
+        <p>Systemd, Docker-in-Docker, persistent disk. Real Linux — not a container pretending to be a machine.</p>
+      </div>
+      <div class="feature-card">
+        <h4>YAML-defined</h4>
+        <p>One manifest per project, version-controlled alongside your code. The manifest IS the documentation.</p>
+      </div>
+      <div class="feature-card">
+        <h4>Health checks</h4>
+        <p>Run <code>check</code> to validate your entire stack. Same checks run during setup and daily work.</p>
+      </div>
+      <div class="feature-card">
+        <h4>Docker + services</h4>
+        <p>Postgres, Redis, whatever you need. Declared in the manifest, running on boot.</p>
+      </div>
+      <div class="feature-card">
+        <h4>VS Code integration</h4>
+        <p>Tasks, launch configs, port forwarding, and status bar — all generated from your manifest.</p>
+      </div>
+      <div class="feature-card">
+        <h4>Day-2 operations</h4>
+        <p>Fleet status, secret rotation, credential sharing, and an admin menu. Not just setup — ongoing ops.</p>
+      </div>
+      <div class="feature-card">
+        <h4>Your cloud, your control</h4>
+        <p>Runs in your Azure subscription. No vendor lock-in, no SaaS bill. MIT licensed.</p>
+      </div>
+      <div class="feature-card">
+        <h4>Auto-shutdown</h4>
+        <p>Environments stop at 7 PM to save costs. Your work persists — start again tomorrow.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Blog -->
+  <section class="blog-section">
+    <h2 style="text-align: center;">From the blog</h2>
+    <div class="blog-cards">
+      <a href="/board/blog/local-dev-is-broken/" class="blog-card">
+        <h3>Local Dev Is Broken</h3>
+        <p>Different OS, different hardware, different tool versions. Why local dev environments are the #1 productivity killer — and what to do about it.</p>
+      </a>
+      <a href="/board/blog/building-board/" class="blog-card">
+        <h3>Building Board: From Bash Scripts to Developer Platform</h3>
+        <p>A technical deep-dive into architecture decisions, the manifest system, encrypted credential handoff, and the engineering behind it all.</p>
+      </a>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section" id="quickstart">
+    <h2>Ready to try it?</h2>
+    <p class="cta-sub">Three commands to a fully provisioned cloud environment.</p>
+    <pre><code>git clone https://github.com/barney-w/board.git
+cd board
+just board</code></pre>
+    <p style="margin-top: 1.5rem;">
+      <a href="https://github.com/barney-w/board">View on GitHub &rarr;</a>
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a href="https://github.com/barney-w/board">GitHub</a>
+      <a href="/board/getting-started/quickstart/">Docs</a>
+      <a href="/board/blog/">Blog</a>
+      <a href="/board/dashboard/">Dashboard</a>
+    </div>
+    <p class="footer-copy">MIT License.</p>
+  </footer>
+
+</body>
+</html>

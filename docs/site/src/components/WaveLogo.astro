@@ -1,0 +1,97 @@
+---
+// Canvas-based circle wave logo animation
+interface Props {
+  size?: number;
+  color?: string;
+}
+const { size = 64, color = '#38bdf8' } = Astro.props;
+---
+<canvas
+  class="wave-logo"
+  width={size * 2}
+  height={size * 2}
+  style={`width:${size}px;height:${size}px;`}
+  data-color={color}
+></canvas>
+
+<script>
+  document.querySelectorAll<HTMLCanvasElement>('canvas.wave-logo').forEach(canvas => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const s = canvas.width;
+    const r = s * 0.46;
+    const cx = s / 2;
+    const cy = s / 2;
+
+    const hex = (canvas.dataset.color || '#38bdf8').replace('#', '');
+    const cr = parseInt(hex.substring(0, 2), 16);
+    const cg = parseInt(hex.substring(2, 4), 16);
+    const cb = parseInt(hex.substring(4, 6), 16);
+
+    let t = 0;
+    const layers = [
+      { yOff: -s * 0.12, amp: s * 0.07, freq: 0.03, speedMul: 1.0, speedOff: 0, opacity: 0.35 },
+      { yOff: 0,          amp: s * 0.04, freq: 0.045, speedMul: 1.6, speedOff: 2, opacity: 1.0 },
+    ];
+
+    function draw() {
+      t += 0.04;
+      const cycle = (Math.sin(t * 0.25) + 1) / 2;
+      const animFill = 0.35 + cycle * 0.3;
+      const waterY = cy + r - animFill * 2 * r;
+
+      ctx!.clearRect(0, 0, s, s);
+      ctx!.save();
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx!.clip();
+
+      for (const layer of layers) {
+        const speed = t * layer.speedMul + layer.speedOff;
+        ctx!.beginPath();
+        ctx!.moveTo(0, s);
+        for (let x = 0; x <= s; x += 2) {
+          const y = waterY + layer.yOff +
+            Math.sin(x * layer.freq + speed) * layer.amp +
+            Math.sin(x * layer.freq * 0.6 + speed * 0.7) * layer.amp * 0.5 +
+            Math.sin(x * layer.freq * 1.8 + speed * 1.3) * layer.amp * 0.3;
+          if (x === 0) ctx!.moveTo(x, y);
+          else ctx!.lineTo(x, y);
+        }
+        ctx!.lineTo(s, cy + r);
+        ctx!.lineTo(0, cy + r);
+        ctx!.closePath();
+
+        const grad = ctx!.createLinearGradient(0, waterY - layer.amp, 0, cy + r);
+        grad.addColorStop(0, `rgba(${cr},${cg},${cb},${layer.opacity * 0.7})`);
+        grad.addColorStop(1, `rgba(${cr},${cg},${cb},${layer.opacity})`);
+        ctx!.fillStyle = grad;
+        ctx!.fill();
+      }
+
+      ctx!.restore();
+
+      // Border
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx!.strokeStyle = `rgba(${cr},${cg},${cb},0.2)`;
+      ctx!.lineWidth = s * 0.025;
+      ctx!.stroke();
+
+      // Shine
+      ctx!.save();
+      ctx!.globalAlpha = 0.12;
+      ctx!.fillStyle = '#fff';
+      ctx!.beginPath();
+      const sr = r * 0.18;
+      ctx!.ellipse(cx - r * 0.32, cy - r * 0.38, sr, sr * 0.55, -0.35, 0, Math.PI * 2);
+      ctx!.fill();
+      ctx!.restore();
+
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  });
+</script>

@@ -1,0 +1,46 @@
+---
+import { getCollection } from 'astro:content';
+import '../../styles/landing.css';
+
+const posts = (await getCollection('blog')).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf()
+);
+---
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blog - Board</title>
+  <link rel="icon" type="image/svg+xml" href="/board/favicon.svg" />
+</head>
+<body>
+  <nav class="blog-nav">
+    <a href="/board/">Board</a> / Blog
+  </nav>
+
+  <section class="blog-index">
+    <h1>Blog</h1>
+    <ul class="blog-list">
+      {posts.map((post) => (
+        <li>
+          <a href={`/board/blog/${post.id}/`}>
+            <h2>{post.data.title}</h2>
+            <time datetime={post.data.date.toISOString()}>
+              {post.data.date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+            </time>
+            {post.data.description && <p>{post.data.description}</p>}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a href="/board/">Home</a>
+      <a href="https://github.com/barney-w/board">GitHub</a>
+      <a href="/board/getting-started/quickstart/">Docs</a>
+    </div>
+  </footer>
+</body>
+</html>

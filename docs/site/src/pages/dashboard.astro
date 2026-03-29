@@ -1,0 +1,98 @@
+---
+import '../styles/landing.css';
+---
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Board — Fleet Dashboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 2rem; }
+    .dashboard { max-width: 960px; margin: 0 auto; }
+    h1 { color: #0ea5e9; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 2rem 0; }
+    .metric-card { background: #1e293b; padding: 1.5rem; border-radius: 8px; text-align: center; }
+    .metric-value { font-size: 2.5rem; font-weight: 800; color: #0ea5e9; }
+    .metric-label { color: #94a3b8; font-size: 0.85rem; margin-top: 0.5rem; }
+    .board-list { background: #1e293b; border-radius: 8px; overflow: hidden; }
+    .board-row { display: grid; grid-template-columns: 2rem 1fr 1fr 1fr 1fr; padding: 0.75rem 1rem; border-bottom: 1px solid #334155; align-items: center; }
+    .board-row.header { font-weight: 600; color: #94a3b8; font-size: 0.85rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .dot.green { background: #22c55e; }
+    .dot.grey { background: #64748b; }
+    .dot.yellow { background: #eab308; }
+    .health-bar { background: #334155; height: 6px; border-radius: 3px; overflow: hidden; }
+    .health-bar-fill { background: #22c55e; height: 100%; }
+    .updated { color: #64748b; font-size: 0.8rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <h1>Fleet Dashboard</h1>
+
+    <div class="metrics" id="metrics"></div>
+    <div class="board-list" id="board-list"></div>
+    <p class="updated" id="updated"></p>
+  </div>
+
+  <script>
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/board/fleet-data.json');
+        const data = await res.json();
+
+        // Metrics
+        const metricsEl = document.getElementById('metrics');
+        if (metricsEl) {
+          metricsEl.innerHTML = `
+            <div class="metric-card">
+              <div class="metric-value">${data.active}/${data.total}</div>
+              <div class="metric-label">Active Boards</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">${data.avgTtfc}m</div>
+              <div class="metric-label">Avg TTFC</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">${data.healthScore}%</div>
+              <div class="metric-label">Health Score</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-value">${data.issues}</div>
+              <div class="metric-label">Open Issues</div>
+            </div>
+          `;
+        }
+
+        // Board list
+        const listEl = document.getElementById('board-list');
+        if (listEl) {
+          let html = '<div class="board-row header"><span></span><span>Name</span><span>Status</span><span>TTFC</span><span>Health</span></div>';
+          for (const board of data.boards) {
+            const dotClass = board.status === 'running' ? 'green' : board.status === 'starting' ? 'yellow' : 'grey';
+            const healthPct = board.healthTotal > 0 ? Math.round(board.healthPassed / board.healthTotal * 100) : 0;
+            html += `<div class="board-row">
+              <span class="dot ${dotClass}"></span>
+              <span>${board.name}</span>
+              <span>${board.status}</span>
+              <span>${board.ttfc ? board.ttfc + 'm' : '—'}</span>
+              <span><div class="health-bar"><div class="health-bar-fill" style="width:${healthPct}%"></div></div> ${board.healthPassed}/${board.healthTotal}</span>
+            </div>`;
+          }
+          listEl.innerHTML = html;
+        }
+
+        // Updated timestamp
+        const updatedEl = document.getElementById('updated');
+        if (updatedEl) {
+          updatedEl.textContent = `Last updated: ${data.updatedAt}`;
+        }
+      } catch (e) {
+        console.error('Failed to load fleet data:', e);
+      }
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>

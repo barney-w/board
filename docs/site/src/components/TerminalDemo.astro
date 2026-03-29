@@ -1,0 +1,23 @@
+---
+// asciinema-player component for terminal replay
+---
+<div class="terminal-demo-wrapper" style="max-width: 800px; margin: 2rem auto;">
+  <div id="demo-player"></div>
+</div>
+
+<script>
+  import 'asciinema-player/dist/bundle/asciinema-player.css';
+  import * as AsciinemaPlayer from 'asciinema-player';
+
+  const el = document.getElementById('demo-player');
+  if (el) {
+    AsciinemaPlayer.create('/board/demo.cast', el, {
+      theme: 'monokai',
+      autoPlay: true,
+      loop: true,
+      speed: 1.5,
+      cols: 100,
+      rows: 30,
+    });
+  }
+</script>
