@@ -1,15 +1,18 @@
 import * as vscode from 'vscode';
-import { getConfig, isConfigured, getSshHostAlias, getPortalUrl, getTunnelUrl } from './config';
+import { getConfig, isConfigured, getSshHostAlias, getHostname, getResourceGroup, getVmName, getPortalUrl, getTunnelUrl } from './config';
 import { writeSshConfig } from './ssh';
 import { connect } from './connection';
-import { importBundle } from './bundle';
+import { importBundle, BundlePayload } from './bundle';
+import { showBoardPassCard } from './boardPassCard';
+import { BoardPassEditorProvider } from './boardPassEditor';
 import { StatusBar } from './statusBar';
 import { BoardTerminalProfileProvider, openWorkspaceTerminals } from './terminal';
 import { isAzCliAvailable, startVm, stopVm } from './azure';
 import { PollingService } from './polling';
-import { VmStatusProvider, QuickActionsProvider } from './sidebar';
+import { VmStatusProvider, QuickActionsProvider, CheatsheetProvider } from './sidebar';
 import { runSetupScript, handleFirstRun } from './firstRun';
 import { showWelcomePanel } from './welcome';
+import { showCheatsheet } from './cheatsheet';
 
 /* ------------------------------------------------------------------ */
 /*  Developer name validation                                          */
@@ -54,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // ---- Tree-view providers ----
   const vmStatusProvider = new VmStatusProvider();
   const quickActionsProvider = new QuickActionsProvider();
+  const cheatsheetProvider = new CheatsheetProvider();
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('board.vmStatus', vmStatusProvider),
   );
@@ -62,6 +66,9 @@ export function activate(context: vscode.ExtensionContext): void {
       'board.quickActions',
       quickActionsProvider,
     ),
+  );
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('board.cheatsheet', cheatsheetProvider),
   );
 
   // Refresh tree views with initial (no-data) state
@@ -242,6 +249,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // ---- board.cheatsheet ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.cheatsheet', () => {
+      showCheatsheet(context);
+    }),
+  );
+
   // ---- Azure CLI availability check (async, non-blocking) ----
   const azCliInstallUrl = 'https://aka.ms/installazurecli';
 
@@ -336,11 +350,57 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // ---- File open handler for .board-pass files ----
+  // ---- Custom editor for .board-pass files ----
+  // Renders the board pass card directly in the editor tab instead of raw JSON.
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      BoardPassEditorProvider.viewType,
+      new BoardPassEditorProvider(context),
+      { supportsMultipleEditorsPerDocument: false },
+    ),
+  );
+
+  // ---- Fallback: text-document handler for .board-pass files ----
+  // If the custom editor doesn't activate (e.g. fresh install, extension host
+  // hasn't reloaded, user chose "Open With > Text"), this catches the file
+  // opened as raw text and shows the card / triggers import anyway.
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (doc.uri.fsPath.endsWith('.board-pass') || doc.uri.fsPath.endsWith('.devvm-bundle')) {
-        vscode.commands.executeCommand('board.importPass', doc.uri);
+      if (!doc.uri.fsPath.endsWith('.board-pass') && !doc.uri.fsPath.endsWith('.devvm-bundle')) {
+        return;
+      }
+      const uri = doc.uri;
+
+      // Close the raw text editor tab (encrypted JSON is meaningless)
+      setTimeout(() => {
+        for (const group of vscode.window.tabGroups.all) {
+          for (const tab of group.tabs) {
+            if (tab.input instanceof vscode.TabInputText &&
+                tab.input.uri.toString() === uri.toString()) {
+              vscode.window.tabGroups.close(tab);
+            }
+          }
+        }
+      }, 200);
+
+      if (isConfigured()) {
+        const cfg = getConfig();
+        const payload: BundlePayload = {
+          developerName: cfg.developerName,
+          environment: cfg.environment,
+          region: cfg.region,
+          regionShort: cfg.regionShort,
+          hostname: getHostname(cfg),
+          username: 'devuser',
+          authMethod: cfg.authMethod,
+          sshPrivateKey: '',
+          sshPublicKey: '',
+          resourceGroup: getResourceGroup(cfg),
+          vmName: getVmName(cfg),
+        };
+        showBoardPassCard(context, payload);
+      } else {
+        vscode.commands.executeCommand('board.importPass', uri);
       }
     }),
   );
@@ -475,18 +535,40 @@ export function activate(context: vscode.ExtensionContext): void {
     showWelcomePanel(context);
   }
 
-  // ---- Auto-open workspace terminals when in a remote SSH session ----
-  if (
-    vscode.env.remoteName === 'ssh-remote' &&
-    isConfigured() &&
-    config.autoOpenTerminals
-  ) {
-    // Delay to let the remote window settle before opening terminals
-    setTimeout(() => {
-      openWorkspaceTerminals().catch((err) => {
-        console.error('[Board] Failed to open workspace terminals:', err);
-      });
-    }, 3000);
+  // ---- Remote SSH session: show board pass card + auto-open terminals ----
+  if (vscode.env.remoteName === 'ssh-remote' && isConfigured()) {
+    // Show the board pass card so the user sees their credentials on the remote side
+    const cfg = getConfig();
+    const remotePayload: BundlePayload = {
+      developerName: cfg.developerName,
+      environment: cfg.environment,
+      region: cfg.region,
+      regionShort: cfg.regionShort,
+      hostname: getHostname(cfg),
+      username: 'devuser',
+      authMethod: cfg.authMethod,
+      sshPrivateKey: '',
+      sshPublicKey: '',
+      resourceGroup: getResourceGroup(cfg),
+      vmName: getVmName(cfg),
+    };
+    showBoardPassCard(context, remotePayload);
+
+    if (config.autoOpenTerminals) {
+      outputChannel.appendLine(
+        `Remote SSH session detected — opening workspace terminals (existing: ${vscode.window.terminals.length})`,
+      );
+      // Delay to let the remote window settle before opening terminals
+      setTimeout(() => {
+        openWorkspaceTerminals().catch((err) => {
+          outputChannel.appendLine(`Failed to open workspace terminals: ${err}`);
+        });
+      }, 3000);
+    }
+  } else {
+    outputChannel.appendLine(
+      `Terminal auto-open skipped: remoteName=${vscode.env.remoteName}, configured=${isConfigured()}, autoOpen=${config.autoOpenTerminals}`,
+    );
   }
 
   outputChannel.appendLine('Board extension activated');

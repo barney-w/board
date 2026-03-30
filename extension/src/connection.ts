@@ -158,7 +158,20 @@ export async function connect(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  // 6. Open the remote folder via Remote-SSH
+  // 6. Ensure Remote-SSH will install this extension on the remote host
+  const remoteSshConfig = vscode.workspace.getConfiguration('remote.SSH');
+  const defaultExts: string[] =
+    remoteSshConfig.get<string[]>('defaultExtensions') ?? [];
+  const extensionId = 'barney-w.board';
+  if (!defaultExts.includes(extensionId)) {
+    await remoteSshConfig.update(
+      'defaultExtensions',
+      [...defaultExts, extensionId],
+      vscode.ConfigurationTarget.Global,
+    );
+  }
+
+  // 7. Open the remote folder via Remote-SSH (replaces current window)
   const hostAlias = getSshHostAlias(config);
   await vscode.commands.executeCommand(
     'vscode.openFolder',
@@ -166,42 +179,6 @@ export async function connect(context: vscode.ExtensionContext): Promise<void> {
       `vscode-remote://ssh-remote+${hostAlias}/home/devuser/projects`,
     ),
   );
-
-  // 7. After remote window opens, check for workspace file
-  const workspaceStateKey = `workspace-opened-${hostAlias}`;
-  const previouslyOpened = context.globalState.get<boolean>(workspaceStateKey, false);
-
-  setTimeout(async () => {
-    try {
-      const workspacePath = `/home/devuser/projects/board.code-workspace`;
-      const remoteUri = vscode.Uri.parse(
-        `vscode-remote://ssh-remote+${hostAlias}${workspacePath}`,
-      );
-
-      // Only proceed if not already in workspace mode
-      if (vscode.workspace.workspaceFile) {
-        return;
-      }
-
-      if (previouslyOpened) {
-        // Previously accepted — open workspace automatically
-        await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
-      } else {
-        // First time — prompt user
-        const open = await vscode.window.showInformationMessage(
-          'A workspace file was found with all your projects configured. Open it?',
-          'Open Workspace',
-          'Not Now',
-        );
-        if (open === 'Open Workspace') {
-          await context.globalState.update(workspaceStateKey, true);
-          await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
-        }
-      }
-    } catch {
-      // Silently ignore — workspace detection is best-effort
-    }
-  }, 5000);
 }
 
 /**

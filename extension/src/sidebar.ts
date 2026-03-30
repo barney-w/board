@@ -151,6 +151,83 @@ export class QuickActionsProvider implements vscode.TreeDataProvider<ActionItem>
 }
 
 /* ------------------------------------------------------------------ */
+/*  Cheatsheet tree provider                                            */
+/* ------------------------------------------------------------------ */
+
+class CheatsheetItem extends vscode.TreeItem {
+  constructor(
+    label: string,
+    collapsible: vscode.TreeItemCollapsibleState,
+    options?: { description?: string; icon?: string; command?: string },
+  ) {
+    super(label, collapsible);
+    if (options?.description) {
+      this.description = options.description;
+    }
+    if (options?.icon) {
+      this.iconPath = new vscode.ThemeIcon(options.icon);
+    }
+    if (options?.command) {
+      this.command = { command: options.command, title: label };
+    }
+  }
+
+  children?: CheatsheetItem[];
+}
+
+export class CheatsheetProvider implements vscode.TreeDataProvider<CheatsheetItem> {
+  private readonly items: CheatsheetItem[];
+
+  constructor() {
+    const vsCodeCmds = new CheatsheetItem('VS Code Commands', vscode.TreeItemCollapsibleState.Expanded, { icon: 'symbol-event' });
+    vsCodeCmds.children = [
+      new CheatsheetItem('Import Pass', vscode.TreeItemCollapsibleState.None, { description: 'decrypt .board-pass', icon: 'key', command: 'board.importPass' }),
+      new CheatsheetItem('Connect', vscode.TreeItemCollapsibleState.None, { description: 'open remote window', icon: 'remote', command: 'board.connect' }),
+      new CheatsheetItem('Start / Stop', vscode.TreeItemCollapsibleState.None, { description: 'power-manage VM', icon: 'play', command: 'board.start' }),
+      new CheatsheetItem('First-Time Setup', vscode.TreeItemCollapsibleState.None, { description: 'Git + SSH keys', icon: 'gear', command: 'board.runSetup' }),
+      new CheatsheetItem('Open in Browser', vscode.TreeItemCollapsibleState.None, { description: 'Tunnel or code-server', icon: 'globe', command: 'board.openInBrowser' }),
+    ];
+
+    const termCmds = new CheatsheetItem('Terminal Commands', vscode.TreeItemCollapsibleState.Expanded, { icon: 'terminal' });
+    termCmds.children = [
+      new CheatsheetItem('check', vscode.TreeItemCollapsibleState.None, { description: 'run health checks', icon: 'heart' }),
+      new CheatsheetItem('board-help', vscode.TreeItemCollapsibleState.None, { description: 'on-VM quick reference', icon: 'question' }),
+      new CheatsheetItem('gs / gd / gl', vscode.TreeItemCollapsibleState.None, { description: 'git status / diff / log', icon: 'git-commit' }),
+      new CheatsheetItem('dc up / down / ps', vscode.TreeItemCollapsibleState.None, { description: 'docker compose shortcuts', icon: 'package' }),
+    ];
+
+    const paths = new CheatsheetItem('Key Paths', vscode.TreeItemCollapsibleState.Collapsed, { icon: 'folder' });
+    paths.children = [
+      new CheatsheetItem('~/projects/', vscode.TreeItemCollapsibleState.None, { description: 'your workspace', icon: 'folder-opened' }),
+      new CheatsheetItem('~/.board/', vscode.TreeItemCollapsibleState.None, { description: 'board config', icon: 'settings-gear' }),
+    ];
+
+    const tips = new CheatsheetItem('Tips', vscode.TreeItemCollapsibleState.Collapsed, { icon: 'lightbulb' });
+    tips.children = [
+      new CheatsheetItem('Auto-shutdown at 7 PM', vscode.TreeItemCollapsibleState.None, { description: 'files persist', icon: 'clock' }),
+      new CheatsheetItem('Ctrl+Shift+P > Run Task', vscode.TreeItemCollapsibleState.None, { description: 'project tasks', icon: 'play' }),
+      new CheatsheetItem('systemctl --user restart <svc>', vscode.TreeItemCollapsibleState.None, { description: 'restart service', icon: 'refresh' }),
+      new CheatsheetItem('journalctl --user -u <svc> -f', vscode.TreeItemCollapsibleState.None, { description: 'stream logs', icon: 'output' }),
+    ];
+
+    const fullRef = new CheatsheetItem('Open Full Cheatsheet', vscode.TreeItemCollapsibleState.None, { icon: 'book', command: 'board.cheatsheet' });
+
+    this.items = [vsCodeCmds, termCmds, paths, tips, fullRef];
+  }
+
+  getTreeItem(element: CheatsheetItem): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: CheatsheetItem): CheatsheetItem[] {
+    if (element) {
+      return element.children ?? [];
+    }
+    return this.items;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 

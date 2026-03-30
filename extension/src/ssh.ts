@@ -124,7 +124,7 @@ export async function writeSshConfig(config: BoardConfig): Promise<void> {
   const existing = await readSshConfig();
   const updated = updateManagedBlock(existing, hostAlias, block);
 
-  await fs.writeFile(configPath, updated, { encoding: 'utf-8', mode: 0o644 });
+  await fs.writeFile(configPath, updated, { encoding: 'utf-8', mode: 0o600 });
 }
 
 /** Remove the managed host block from SSH config */
@@ -155,7 +155,7 @@ export async function removeSshConfig(hostAlias: string): Promise<void> {
   const cleaned = (before + after).replace(/\n{3,}/g, '\n\n').trim();
   const result = cleaned.length > 0 ? cleaned + '\n' : '';
 
-  await fs.writeFile(configPath, result, { encoding: 'utf-8', mode: 0o644 });
+  await fs.writeFile(configPath, result, { encoding: 'utf-8', mode: 0o600 });
 }
 
 /** Check if the SSH key file exists at the expected path */

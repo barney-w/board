@@ -29,7 +29,9 @@ export async function checkRemoteSentinels(config: BoardConfig): Promise<{
 }
 
 /** Show appropriate notification based on sentinel state */
-export async function handleFirstRun(config: BoardConfig, context: vscode.ExtensionContext): Promise<void> {
+export async function handleFirstRun(config: BoardConfig, context: vscode.ExtensionContext, retryCount: number = 0): Promise<void> {
+  const MAX_RETRIES = 20;
+
   // Check one-time flag
   const key = `board.firstRunPromptShown.${config.developerName}`;
   if (context.globalState.get<boolean>(key)) {
@@ -39,12 +41,18 @@ export async function handleFirstRun(config: BoardConfig, context: vscode.Extens
   const sentinels = await checkRemoteSentinels(config);
 
   if (!sentinels.cloudInitComplete) {
+    if (retryCount >= MAX_RETRIES) {
+      vscode.window.showWarningMessage(
+        'cloud-init has not completed after many checks. Please investigate the VM manually.',
+      );
+      return;
+    }
     const choice = await vscode.window.showInformationMessage(
       'Your VM is still being configured by cloud-init. Some tools may not be ready yet. This usually takes 5-8 minutes.',
       'Check Again',
     );
     if (choice === 'Check Again') {
-      await handleFirstRun(config, context); // Recursive retry
+      await handleFirstRun(config, context, retryCount + 1);
     }
     return;
   }
@@ -68,7 +76,7 @@ export function runSetupScript(config: BoardConfig): void {
   const terminal = vscode.window.createTerminal({
     name: 'Board Setup',
     shellPath: 'ssh',
-    shellArgs: [getSshHostAlias(config), 'bash ~/setup-me.sh'],
+    shellArgs: ['-t', getSshHostAlias(config), 'bash ~/setup-me.sh'],
     iconPath: new vscode.ThemeIcon('gear'),
   });
   terminal.show();

@@ -22,39 +22,25 @@ export class BoardTerminalProfileProvider
 }
 
 /**
- * Open a 2-pane workspace terminal layout: Terminal (left) | Copilot (right).
+ * Open workspace terminals: a general-purpose Terminal and a Copilot tab.
  *
  * When running inside a Remote-SSH session, createTerminal() opens shells
  * on the remote VM — no SSH wrapping needed.
  */
 export async function openWorkspaceTerminals(): Promise<void> {
-  // Create the free terminal (left pane)
+  // Create the Copilot terminal first (so it appears as the second tab)
+  const copilot = vscode.window.createTerminal({
+    name: 'Copilot',
+    iconPath: new vscode.ThemeIcon('sparkle'),
+  });
+  copilot.sendText(
+    'gh copilot 2>/dev/null || echo "Run gh auth login first, then: gh extension install github/gh-copilot && gh copilot"',
+  );
+
+  // Create the main terminal and focus it
   const terminal = vscode.window.createTerminal({
     name: 'Terminal',
     iconPath: new vscode.ThemeIcon('terminal'),
   });
   terminal.show();
-
-  // Small delay to let the terminal initialise before splitting
-  await new Promise((r) => setTimeout(r, 500));
-
-  // Split to create Copilot pane (right pane)
-  await vscode.commands.executeCommand('workbench.action.terminal.split');
-
-  // Rename the new split pane
-  await vscode.commands.executeCommand(
-    'workbench.action.terminal.renameWithArg',
-    { name: 'Copilot' },
-  );
-
-  // Send the copilot command to the active (right) pane
-  const copilotTerminal = vscode.window.activeTerminal;
-  if (copilotTerminal) {
-    copilotTerminal.sendText('gh copilot');
-  }
-
-  // Focus back on the left terminal
-  await vscode.commands.executeCommand(
-    'workbench.action.terminal.focusPreviousPane',
-  );
 }

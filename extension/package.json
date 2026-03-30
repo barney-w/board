@@ -4,7 +4,7 @@
   "description": "One-click connection to your Board cloud dev environment",
   "version": "0.1.0",
   "publisher": "barney-w",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": { "vscode": "^1.96.0" },
   "categories": ["Other", "SCM Providers"],
   "keywords": ["board", "cloud", "development", "environment", "ssh", "azure", "vm"],
@@ -17,6 +17,7 @@
     "theme": "dark"
   },
   "activationEvents": ["onStartupFinished", "onLanguage:board-pass", "onCommand:board.importPass", "onCommand:board.configure"],
+  "extensionKind": ["workspace", "ui"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -31,7 +32,8 @@
       { "command": "board.openInBrowser", "title": "Board: Open in Browser", "icon": "$(globe)" },
       { "command": "board.openCodeServer", "title": "Board: Open code-server" },
       { "command": "board.openTunnel", "title": "Board: Open VS Code Tunnel" },
-      { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" }
+      { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" },
+      { "command": "board.cheatsheet", "title": "Board: Cheatsheet", "icon": "$(book)" }
     ],
     "configuration": {
       "title": "Board",
@@ -40,7 +42,7 @@
           "type": "string",
           "default": "",
           "description": "Your developer name (e.g. jbloggs). Lowercase, alphanumeric, max 12 chars.",
-          "pattern": "^[a-z][a-z0-9]{0,11}$"
+          "pattern": "^([a-z][a-z0-9]{0,11})?$"
         },
         "board.environment": {
           "type": "string",
@@ -76,7 +78,7 @@
         "board.autoOpenTerminals": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-open Terminal + Copilot split panes when connecting"
+          "description": "Auto-open Terminal and Copilot terminal tabs when connecting"
         },
         "board.pollIntervalSeconds": {
           "type": "number",
@@ -104,7 +106,8 @@
     "views": {
       "board": [
         { "id": "board.vmStatus", "name": "Board Status" },
-        { "id": "board.quickActions", "name": "Quick Actions" }
+        { "id": "board.quickActions", "name": "Quick Actions" },
+        { "id": "board.cheatsheet", "name": "Cheatsheet" }
       ]
     },
     "walkthroughs": [
@@ -140,6 +143,17 @@
         ]
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "board.boardPassEditor",
+        "displayName": "Board Pass",
+        "selector": [
+          { "filenamePattern": "*.board-pass" },
+          { "filenamePattern": "*.devvm-bundle" }
+        ],
+        "priority": "default"
+      }
+    ],
     "languages": [
       {
         "id": "board-pass",
@@ -167,7 +181,7 @@
     "build": "node esbuild.config.js",
     "build:prod": "node esbuild.config.js --production",
     "package": "npx @vscode/vsce package --no-dependencies",
-    "lint": "eslint src/",
+    "lint": "npx eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
   },
