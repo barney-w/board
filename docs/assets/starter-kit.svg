@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 240" width="680" height="240">
+  <defs>
+    <style>
+      text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .sans { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="680" height="240" rx="12" fill="#0f172a"/>
+
+  <!-- ═══ Zip file icon + label ═══ -->
+  <g>
+    <!-- Folder icon -->
+    <g transform="translate(28, 24)">
+      <rect x="0" y="6" width="28" height="20" rx="3" fill="#0ea5e9" opacity="0.2"
+            stroke="#0ea5e9" stroke-width="1" stroke-opacity="0.4"/>
+      <path d="M0,11 Q0,6 5,6 L10,6 L13,3 Q14,2 16,2 L23,2 Q28,2 28,7 L28,11 Z"
+            fill="#0ea5e9" opacity="0.3"/>
+      <!-- Zip teeth -->
+      <rect x="12" y="8" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+      <rect x="12" y="12" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+      <rect x="12" y="16" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+      <rect x="12" y="20" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+    </g>
+
+    <text x="66" y="40" font-size="15" font-weight="600" fill="#e2e8f0"
+          class="sans">jbloggs-board.zip</text>
+    <text x="230" y="40" font-size="11" fill="#475569" class="sans">Starter kit — everything in one file</text>
+  </g>
+
+  <!-- Divider -->
+  <line x1="28" y1="58" x2="652" y2="58" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ═══ File list ═══ -->
+
+  <!-- Row 1: board.vsix -->
+  <g>
+    <text x="44" y="88" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+    <!-- Extension icon -->
+    <rect x="80" y="74" width="22" height="22" rx="5" fill="#8b5cf6" opacity="0.15"/>
+    <text x="91" y="90" text-anchor="middle" font-size="11" fill="#a78bfa" class="sans">Ex</text>
+    <text x="112" y="90" font-size="13" fill="#e2e8f0">board.vsix</text>
+    <text x="652" y="90" text-anchor="end" font-size="11" fill="#64748b" class="sans">VS Code extension</text>
+  </g>
+
+  <!-- Row 2: .board-pass -->
+  <g>
+    <text x="44" y="124" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+    <!-- Key icon -->
+    <rect x="80" y="110" width="22" height="22" rx="5" fill="#0ea5e9" opacity="0.15"/>
+    <text x="91" y="126" text-anchor="middle" font-size="13" fill="#38bdf8">&#x1F511;</text>
+    <text x="112" y="126" font-size="13" fill="#e2e8f0">jbloggs.board-pass</text>
+    <text x="652" y="126" text-anchor="end" font-size="11" fill="#64748b" class="sans">Encrypted credentials</text>
+  </g>
+
+  <!-- Row 3: Setup Board.command -->
+  <g>
+    <text x="44" y="160" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+    <!-- Play icon -->
+    <rect x="80" y="146" width="22" height="22" rx="5" fill="#22c55e" opacity="0.15"/>
+    <text x="91" y="163" text-anchor="middle" font-size="12" fill="#4ade80">&#x25B6;</text>
+    <text x="112" y="162" font-size="13" fill="#e2e8f0">Setup Board</text>
+    <text x="652" y="162" text-anchor="end" font-size="11" fill="#64748b" class="sans">Double-click to get started</text>
+    <rect x="234" y="149" width="80" height="18" rx="9" fill="#22c55e" opacity="0.1"/>
+    <text x="274" y="162" text-anchor="middle" font-size="10" fill="#22c55e" class="sans">start here</text>
+  </g>
+
+  <!-- Row 4: Quick Start.pdf -->
+  <g>
+    <text x="44" y="196" font-size="12" fill="#475569">&#x2514;&#x2500;&#x2500;</text>
+    <!-- PDF icon -->
+    <rect x="80" y="182" width="22" height="22" rx="5" fill="#ef4444" opacity="0.15"/>
+    <text x="91" y="198" text-anchor="middle" font-size="9" font-weight="700" fill="#f87171" class="sans">PDF</text>
+    <text x="112" y="198" font-size="13" fill="#e2e8f0">Board Quick Start.pdf</text>
+    <text x="652" y="198" text-anchor="end" font-size="11" fill="#64748b" class="sans">Printed guide</text>
+  </g>
+
+  <!-- File count -->
+  <text x="652" y="228" text-anchor="end" font-size="10" fill="#334155" class="sans">4 files &#183; ~35 KB</text>
+</svg>

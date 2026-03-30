@@ -1,0 +1,65 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if Pages is enabled
+        id: pages-check
+        run: |
+          if gh api repos/${{ github.repository }}/pages --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::GitHub Pages is not enabled — skipping deployment"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/setup-node@v4
+        if: steps.pages-check.outputs.enabled == 'true'
+        with:
+          node-version: "20"
+
+      - name: Install and build
+        if: steps.pages-check.outputs.enabled == 'true'
+        working-directory: docs/site
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure Pages
+        if: steps.pages-check.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        if: steps.pages-check.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/dist
+
+      - name: Deploy to GitHub Pages
+        if: steps.pages-check.outputs.enabled == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 200" width="680" height="200">
+  <defs>
+    <style>
+      text{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:14px}
+
+      /* Screen blanks all content at once */
+      @keyframes screen{0%,78%{opacity:1}80%,100%{opacity:0}}
+
+      /* Elements appear sequentially, stay visible (parent handles blanking) */
+      @keyframes p1{0%,4%{opacity:0}7%,100%{opacity:1}}
+      @keyframes p2{0%,19%{opacity:0}22%,100%{opacity:1}}
+      @keyframes p3{0%,34%{opacity:0}37%,100%{opacity:1}}
+      @keyframes p4{0%,44%{opacity:0}47%,100%{opacity:1}}
+      @keyframes t1{0%,5%{clip-path:inset(0 100% 0 0)}14%,100%{clip-path:inset(0 0 0 0)}}
+      @keyframes t2{0%,20%{clip-path:inset(0 100% 0 0)}30%,100%{clip-path:inset(0 0 0 0)}}
+      @keyframes t3{0%,35%{clip-path:inset(0 100% 0 0)}41%,100%{clip-path:inset(0 0 0 0)}}
+      @keyframes r1{0%,15%{opacity:0}18%,100%{opacity:1}}
+      @keyframes r2{0%,31%{opacity:0}34%,100%{opacity:1}}
+      @keyframes r3{0%,42%{opacity:0}45%,100%{opacity:1}}
+      @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+      .screen{animation:screen 10s linear infinite}
+      .p1{animation:p1 10s linear infinite}
+      .p2{animation:p2 10s linear infinite}
+      .p3{animation:p3 10s linear infinite}
+      .p4{animation:p4 10s linear infinite}
+      .t1{animation:t1 10s linear infinite}
+      .t2{animation:t2 10s linear infinite}
+      .t3{animation:t3 10s linear infinite}
+      .r1{animation:r1 10s linear infinite}
+      .r2{animation:r2 10s linear infinite}
+      .r3{animation:r3 10s linear infinite}
+      .cursor{animation:blink 1s step-end infinite}
+    </style>
+  </defs>
+
+  <!-- Terminal frame (always visible) -->
+  <rect width="680" height="200" fill="#0f172a" rx="12"/>
+  <circle cx="20" cy="16" r="5" fill="#ef4444"/>
+  <circle cx="36" cy="16" r="5" fill="#eab308"/>
+  <circle cx="52" cy="16" r="5" fill="#22c55e"/>
+
+  <!-- Screen content (blanks all at once) -->
+  <g class="screen">
+    <!-- Line 1: just board -->
+    <text x="24" y="62" fill="#64748b" class="p1">$</text>
+    <text x="42" y="62" fill="#e2e8f0" class="t1">just board</text>
+    <text x="300" y="62" fill="#22c55e" class="r1">✓ VM ready — 10m 47s</text>
+
+    <!-- Line 2: just export-pass jbloggs -->
+    <text x="24" y="97" fill="#64748b" class="p2">$</text>
+    <text x="42" y="97" fill="#e2e8f0" class="t2">just export-pass jbloggs</text>
+    <text x="300" y="97" fill="#22c55e" class="r2">✓ Pass exported</text>
+
+    <!-- Line 3: check -->
+    <text x="24" y="132" fill="#64748b" class="p3">$</text>
+    <text x="42" y="132" fill="#e2e8f0" class="t3">check</text>
+    <text x="300" y="132" fill="#22c55e" class="r3">✓ All checks passed (9/9)</text>
+
+    <!-- Line 4: ready prompt with blinking cursor -->
+    <g class="p4">
+      <text x="24" y="167" fill="#64748b">$</text>
+      <rect x="42" y="153" width="2" height="17" fill="#0ea5e9" class="cursor"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,361 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 350" width="680" height="350">
+  <defs>
+    <style>
+      text{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:14px}
+      .sans{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+
+      /* ═══ Scene transitions — 30s loop ═══ */
+      @keyframes sc1{0%{opacity:1}22%{opacity:1}24%{opacity:0}100%{opacity:0}}
+      @keyframes sc2{0%,27%{opacity:0}29%{opacity:1}49%{opacity:1}51%{opacity:0}100%{opacity:0}}
+      @keyframes sc3{0%,54%{opacity:0}56%{opacity:1}69%{opacity:1}71%{opacity:0}100%{opacity:0}}
+      @keyframes sc4{0%,74%{opacity:0}76%{opacity:1}95%{opacity:1}97%{opacity:0}100%{opacity:0}}
+      .sc1{animation:sc1 30s linear infinite}
+      .sc2{animation:sc2 30s linear infinite}
+      .sc3{animation:sc3 30s linear infinite}
+      .sc4{animation:sc4 30s linear infinite}
+
+      /* ═══ Scene 1 — terminal typing ═══ */
+      @keyframes a-p1{0%,3%{opacity:0}5%,100%{opacity:1}}
+      @keyframes a-t1{0%,4%{clip-path:inset(0 100% 0 0)}10%,100%{clip-path:inset(0 0 0 0)}}
+      @keyframes a-r1{0%,11%{opacity:0}13%,100%{opacity:1}}
+      @keyframes a-p2{0%,13%{opacity:0}14%,100%{opacity:1}}
+      @keyframes a-t2{0%,14%{clip-path:inset(0 100% 0 0)}20%,100%{clip-path:inset(0 0 0 0)}}
+      @keyframes a-r2{0%,20%{opacity:0}22%,100%{opacity:1}}
+      @keyframes a-idle{0%,21%{opacity:0}22%,100%{opacity:1}}
+      .a-p1{animation:a-p1 30s linear infinite}
+      .a-t1{animation:a-t1 30s linear infinite}
+      .a-r1{animation:a-r1 30s linear infinite}
+      .a-p2{animation:a-p2 30s linear infinite}
+      .a-t2{animation:a-t2 30s linear infinite}
+      .a-r2{animation:a-r2 30s linear infinite}
+      .a-idle{animation:a-idle 30s linear infinite}
+
+      /* ═══ Scene 2 — board pass reveals ═══ */
+      @keyframes b-hd{0%,30%{opacity:0}32%,100%{opacity:1}}
+      @keyframes b-id{0%,34%{opacity:0}36%,100%{opacity:1}}
+      @keyframes b-fl{0%,37%{opacity:0}39%,100%{opacity:1}}
+      @keyframes b-st{0%,40%{opacity:0}42%,100%{opacity:1}}
+      @keyframes b-bt{0%,44%{opacity:0}46%,100%{opacity:1}}
+      .b-hd{animation:b-hd 30s linear infinite}
+      .b-id{animation:b-id 30s linear infinite}
+      .b-fl{animation:b-fl 30s linear infinite}
+      .b-st{animation:b-st 30s linear infinite}
+      .b-bt{animation:b-bt 30s linear infinite}
+
+      /* ═══ Scene 3 — starter kit reveals ═══ */
+      @keyframes c-hd{0%,57%{opacity:0}58%,100%{opacity:1}}
+      @keyframes c-f1{0%,59%{opacity:0}60%,100%{opacity:1}}
+      @keyframes c-f2{0%,61%{opacity:0}62%,100%{opacity:1}}
+      @keyframes c-f3{0%,63%{opacity:0}64%,100%{opacity:1}}
+      @keyframes c-f4{0%,65%{opacity:0}66%,100%{opacity:1}}
+      .c-hd{animation:c-hd 30s linear infinite}
+      .c-f1{animation:c-f1 30s linear infinite}
+      .c-f2{animation:c-f2 30s linear infinite}
+      .c-f3{animation:c-f3 30s linear infinite}
+      .c-f4{animation:c-f4 30s linear infinite}
+
+      /* ═══ Scene 4 — VS Code reveals ═══ */
+      @keyframes d-i1{0%,79%{opacity:0}80%,100%{opacity:1}}
+      @keyframes d-i2{0%,83%{opacity:0}84%,100%{opacity:1}}
+      @keyframes d-i3{0%,87%{opacity:0}88%,100%{opacity:1}}
+      @keyframes d-sb{0%,91%{opacity:0}93%,100%{opacity:1}}
+      .d-i1{animation:d-i1 30s linear infinite}
+      .d-i2{animation:d-i2 30s linear infinite}
+      .d-i3{animation:d-i3 30s linear infinite}
+      .d-sb{animation:d-sb 30s linear infinite}
+
+      /* ═══ Shared ═══ */
+      @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+      @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+      .cursor{animation:blink 1s step-end infinite}
+      .pulse{animation:pulse 2.5s ease-in-out infinite}
+    </style>
+
+    <!-- Board pass gradients & patterns -->
+    <linearGradient id="card-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1f2e"/>
+      <stop offset="100%" stop-color="#151926"/>
+    </linearGradient>
+    <linearGradient id="header-bg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <linearGradient id="shimmer" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="white" stop-opacity="0"/>
+      <stop offset="50%" stop-color="white" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="sec-grid" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="20" y2="0" stroke="white" stroke-opacity="0.04" stroke-width="0.5"/>
+      <line x1="0" y1="0" x2="0" y2="20" stroke="white" stroke-opacity="0.04" stroke-width="0.5"/>
+    </pattern>
+    <clipPath id="bp-clip">
+      <rect width="680" height="350" rx="12"/>
+    </clipPath>
+  </defs>
+
+  <!-- Persistent dark background -->
+  <rect width="680" height="350" rx="12" fill="#0f172a"/>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SCENE 1 — Admin Terminal                                    -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <g class="sc1">
+    <!-- Title bar -->
+    <path d="M0,12 Q0,0 12,0 L668,0 Q680,0 680,12 L680,32 L0,32 Z" fill="#1a2332"/>
+    <circle cx="20" cy="16" r="5" fill="#ef4444"/>
+    <circle cx="36" cy="16" r="5" fill="#eab308"/>
+    <circle cx="52" cy="16" r="5" fill="#22c55e"/>
+    <text x="340" y="21" text-anchor="middle" font-size="11" fill="#475569" class="sans">Terminal</text>
+
+    <!-- Line 1: just board -->
+    <text x="28" y="120" fill="#64748b" class="a-p1">$</text>
+    <text x="48" y="120" fill="#e2e8f0" class="a-t1">just board</text>
+    <text x="300" y="120" fill="#22c55e" font-size="13" class="a-r1">&#x2713; VM ready &#x2014; 10m 47s</text>
+
+    <!-- Line 2: just export-pass jbloggs -->
+    <text x="28" y="170" fill="#64748b" class="a-p2">$</text>
+    <text x="48" y="170" fill="#e2e8f0" class="a-t2">just export-pass jbloggs</text>
+    <text x="300" y="170" fill="#22c55e" font-size="13" class="a-r2">&#x2713; Starter kit created</text>
+
+    <!-- Idle prompt -->
+    <g class="a-idle">
+      <text x="28" y="220" fill="#64748b">$</text>
+      <rect x="48" y="206" width="2" height="17" fill="#0ea5e9" class="cursor"/>
+    </g>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SCENE 2 — Board Pass                                        -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <g class="sc2">
+    <!-- Card frame (background + border, visible with scene fade) -->
+    <rect width="680" height="350" rx="12" fill="url(#card-bg)" stroke="#2a3040" stroke-width="1"/>
+
+    <g clip-path="url(#bp-clip)">
+      <!-- Holographic shimmer -->
+      <rect width="680" height="350" fill="url(#shimmer)"/>
+
+      <!-- ── Header strip ── -->
+      <g class="b-hd">
+        <rect x="0" y="0" width="680" height="52" fill="url(#header-bg)"/>
+        <rect x="0" y="0" width="680" height="52" fill="url(#sec-grid)"/>
+        <!-- Shield icon -->
+        <g transform="translate(22, 12)">
+          <path d="M14,2 L3,7 L3,13 C3,19.5 7.8,25.6 14,27 C20.2,25.6 25,19.5 25,13 L25,7 Z"
+                fill="none" stroke="white" stroke-width="1.5" opacity="0.9"/>
+          <path d="M11,14 L13.5,16.5 L18,11" stroke="white" stroke-width="1.8"
+                fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+        </g>
+        <text x="52" y="27" font-size="12" font-weight="700" fill="white" letter-spacing="0.18em"
+              class="sans">B O A R D &#160; P A S S</text>
+        <text x="52" y="43" font-size="10" fill="rgba(255,255,255,0.7)" letter-spacing="0.08em"
+              class="sans">ACCESS CREDENTIAL</text>
+      </g>
+
+      <!-- ── Identity ── -->
+      <g class="b-id">
+        <rect x="28" y="68" width="42" height="42" rx="8" fill="#0ea5e9" opacity="0.15"/>
+        <text x="49" y="96" text-anchor="middle" font-size="16" font-weight="700"
+              fill="#38bdf8" class="sans">JB</text>
+        <text x="84" y="87" font-size="16" font-weight="600" fill="#e2e8f0" class="sans">jbloggs</text>
+        <text x="84" y="104" font-size="11" fill="#64748b"
+              class="sans">personal environment &#183; australiaeast</text>
+      </g>
+
+      <!-- ── AUTHORISED stamp ── -->
+      <g class="b-st">
+        <g transform="translate(588, 82)">
+          <rect x="-52" y="-13" width="104" height="26" rx="4"
+                fill="none" stroke="#22c55e" stroke-width="2" opacity="0.8"/>
+          <text x="0" y="4" text-anchor="middle" font-size="11" font-weight="700"
+                fill="#22c55e" letter-spacing="0.1em" class="sans">AUTHORISED</text>
+        </g>
+      </g>
+
+      <!-- ── Field grid + clearance ── -->
+      <g class="b-fl">
+        <!-- Row 1: VM + Zone -->
+        <text x="28" y="136" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">VM</text>
+        <text x="28" y="152" font-size="15" font-weight="600" fill="#e2e8f0">devvm-jbloggs</text>
+        <text x="560" y="136" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">ZONE</text>
+        <rect x="560" y="140" width="44" height="20" rx="4" fill="#0ea5e9" opacity="0.12"/>
+        <text x="582" y="155" text-anchor="middle" font-size="13" font-weight="700" fill="#38bdf8">AUE</text>
+
+        <!-- Row 2: Auth + Issued + Expires -->
+        <text x="28" y="180" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">AUTH METHOD</text>
+        <text x="28" y="196" font-size="13" fill="#e2e8f0">ssh-key</text>
+        <text x="220" y="180" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">ISSUED</text>
+        <text x="220" y="196" font-size="13" fill="#e2e8f0">29 Mar 2026</text>
+        <text x="400" y="180" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">EXPIRES</text>
+        <text x="400" y="196" font-size="13" fill="#e2e8f0">29 Mar 2028</text>
+        <rect x="530" y="182" width="58" height="18" rx="9" fill="#22c55e" opacity="0.12"/>
+        <text x="559" y="195" text-anchor="middle" font-size="10" font-weight="600"
+              fill="#22c55e" class="sans">2 years</text>
+
+        <!-- Clearance -->
+        <text x="28" y="224" font-size="9" fill="#64748b" letter-spacing="0.08em" class="sans">CLEARANCE</text>
+        <rect x="28" y="232" width="120" height="24" rx="12" fill="#1e293b"/>
+        <circle cx="44" cy="244" r="3.5" fill="#22c55e"/>
+        <text x="54" y="249" font-size="11" fill="#94a3b8" class="sans">SSH Terminal</text>
+        <rect x="160" y="232" width="140" height="24" rx="12" fill="#1e293b"/>
+        <circle cx="176" cy="244" r="3.5" fill="#22c55e"/>
+        <text x="186" y="249" font-size="11" fill="#94a3b8" class="sans">VS Code Tunnel</text>
+        <rect x="312" y="232" width="120" height="24" rx="12" fill="#1e293b"/>
+        <circle cx="328" cy="244" r="3.5" fill="#22c55e"/>
+        <text x="338" y="249" font-size="11" fill="#94a3b8" class="sans">code-server</text>
+      </g>
+
+      <!-- ── Action buttons ── -->
+      <g class="b-bt">
+        <rect x="200" y="286" width="140" height="32" rx="6" fill="#0ea5e9"/>
+        <text x="270" y="307" text-anchor="middle" font-size="12" font-weight="600"
+              fill="white" class="sans">Connect Now</text>
+        <rect x="352" y="286" width="140" height="32" rx="6"
+              fill="none" stroke="#334155" stroke-width="1"/>
+        <text x="422" y="307" text-anchor="middle" font-size="12" font-weight="500"
+              fill="#94a3b8" class="sans">Delete Pass File</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SCENE 3 — Starter Kit                                       -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <g class="sc3">
+    <g transform="translate(0,55)">
+      <!-- Zip file icon + label -->
+      <g class="c-hd">
+        <g transform="translate(28, 24)">
+          <rect x="0" y="6" width="28" height="20" rx="3" fill="#0ea5e9" opacity="0.2"
+                stroke="#0ea5e9" stroke-width="1" stroke-opacity="0.4"/>
+          <path d="M0,11 Q0,6 5,6 L10,6 L13,3 Q14,2 16,2 L23,2 Q28,2 28,7 L28,11 Z"
+                fill="#0ea5e9" opacity="0.3"/>
+          <rect x="12" y="8" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+          <rect x="12" y="12" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+          <rect x="12" y="16" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+          <rect x="12" y="20" width="4" height="2" rx="0.5" fill="white" opacity="0.3"/>
+        </g>
+        <text x="66" y="40" font-size="15" font-weight="600" fill="#e2e8f0" class="sans">jbloggs-board.zip</text>
+        <text x="230" y="40" font-size="11" fill="#475569" class="sans">Starter kit &#x2014; everything in one file</text>
+        <line x1="28" y1="58" x2="652" y2="58" stroke="#1e293b" stroke-width="1"/>
+      </g>
+
+      <!-- Row 1: board.vsix -->
+      <g class="c-f1">
+        <text x="44" y="88" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+        <rect x="80" y="74" width="22" height="22" rx="5" fill="#8b5cf6" opacity="0.15"/>
+        <text x="91" y="90" text-anchor="middle" font-size="11" fill="#a78bfa" class="sans">Ex</text>
+        <text x="112" y="90" font-size="13" fill="#e2e8f0">board.vsix</text>
+        <text x="652" y="90" text-anchor="end" font-size="11" fill="#64748b" class="sans">VS Code extension</text>
+      </g>
+
+      <!-- Row 2: .board-pass -->
+      <g class="c-f2">
+        <text x="44" y="124" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+        <rect x="80" y="110" width="22" height="22" rx="5" fill="#0ea5e9" opacity="0.15"/>
+        <text x="91" y="126" text-anchor="middle" font-size="13" fill="#38bdf8">&#x1F511;</text>
+        <text x="112" y="126" font-size="13" fill="#e2e8f0">jbloggs.board-pass</text>
+        <text x="652" y="126" text-anchor="end" font-size="11" fill="#64748b" class="sans">Encrypted credentials</text>
+      </g>
+
+      <!-- Row 3: Setup Board -->
+      <g class="c-f3">
+        <text x="44" y="160" font-size="12" fill="#475569">&#x251C;&#x2500;&#x2500;</text>
+        <rect x="80" y="146" width="22" height="22" rx="5" fill="#22c55e" opacity="0.15"/>
+        <text x="91" y="163" text-anchor="middle" font-size="12" fill="#4ade80">&#x25B6;</text>
+        <text x="112" y="162" font-size="13" fill="#e2e8f0">Setup Board</text>
+        <text x="652" y="162" text-anchor="end" font-size="11" fill="#64748b" class="sans">Double-click to get started</text>
+        <rect x="234" y="149" width="80" height="18" rx="9" fill="#22c55e" opacity="0.1"/>
+        <text x="274" y="162" text-anchor="middle" font-size="10" fill="#22c55e" class="sans">start here</text>
+      </g>
+
+      <!-- Row 4: Quick Start.pdf -->
+      <g class="c-f4">
+        <text x="44" y="196" font-size="12" fill="#475569">&#x2514;&#x2500;&#x2500;</text>
+        <rect x="80" y="182" width="22" height="22" rx="5" fill="#ef4444" opacity="0.15"/>
+        <text x="91" y="198" text-anchor="middle" font-size="9" font-weight="700" fill="#f87171" class="sans">PDF</text>
+        <text x="112" y="198" font-size="13" fill="#e2e8f0">Board Quick Start.pdf</text>
+        <text x="652" y="198" text-anchor="end" font-size="11" fill="#64748b" class="sans">Printed guide</text>
+      </g>
+
+      <!-- File count -->
+      <g class="c-f4">
+        <text x="652" y="228" text-anchor="end" font-size="10" fill="#334155" class="sans">4 files &#183; ~35 KB</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SCENE 4 — VS Code Extension                                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <g class="sc4">
+    <!-- VS Code background -->
+    <rect width="680" height="350" rx="12" fill="#1e1e1e"/>
+
+    <!-- Title bar -->
+    <path d="M0,12 Q0,0 12,0 L668,0 Q680,0 680,12 L680,32 L0,32 Z" fill="#2d2d2d"/>
+    <circle cx="18" cy="16" r="5" fill="#ff5f57"/>
+    <circle cx="34" cy="16" r="5" fill="#febc2e"/>
+    <circle cx="50" cy="16" r="5" fill="#28c840"/>
+    <text x="340" y="20" text-anchor="middle" font-size="11" fill="#8c8c8c" class="sans">Board &#x2014; VS Code Extension</text>
+
+    <!-- Activity bar -->
+    <rect x="0" y="32" width="40" height="288" fill="#252526"/>
+    <rect x="0" y="32" width="2" height="28" fill="#0ea5e9" rx="1"/>
+    <rect x="10" y="40" width="20" height="20" rx="5" fill="#0ea5e9" opacity="0.12"/>
+    <text x="20" y="55" text-anchor="middle" font-size="12" font-weight="700"
+          fill="#0ea5e9" class="sans">B</text>
+
+    <!-- Command palette items -->
+    <!-- Item 1: Import Pass -->
+    <g class="d-i1">
+      <rect x="52" y="44" width="614" height="32" rx="4" fill="#2a2d36"/>
+      <rect x="52" y="44" width="3" height="32" rx="1" fill="#0ea5e9" opacity="0.6"/>
+      <text x="70" y="65" font-size="13">
+        <tspan fill="#569cd6">&gt;</tspan>
+        <tspan fill="#dcdcaa"> Board: Import Pass</tspan>
+      </text>
+      <text x="652" y="65" text-anchor="end" font-size="11.5" fill="#6a737d"
+            class="sans">decrypt .board-pass &#x2014; auto-configure SSH</text>
+    </g>
+
+    <!-- Item 2: Connect -->
+    <g class="d-i2">
+      <rect x="52" y="84" width="614" height="32" rx="4" fill="#2a2d36"/>
+      <rect x="52" y="84" width="3" height="32" rx="1" fill="#8b5cf6" opacity="0.6"/>
+      <text x="70" y="105" font-size="13">
+        <tspan fill="#569cd6">&gt;</tspan>
+        <tspan fill="#dcdcaa"> Board: Connect</tspan>
+      </text>
+      <text x="652" y="105" text-anchor="end" font-size="11.5" fill="#6a737d"
+            class="sans">one-click SSH tunnel + port forwarding</text>
+    </g>
+
+    <!-- Item 3: Health Check -->
+    <g class="d-i3">
+      <rect x="52" y="124" width="614" height="32" rx="4" fill="#2a2d36"/>
+      <rect x="52" y="124" width="3" height="32" rx="1" fill="#10b981" opacity="0.6"/>
+      <text x="70" y="145" font-size="13">
+        <tspan fill="#569cd6">&gt;</tspan>
+        <tspan fill="#dcdcaa"> Board: Health Check</tspan>
+      </text>
+      <text x="652" y="145" text-anchor="end" font-size="11.5" fill="#6a737d"
+            class="sans">verify services, ports, and dependencies</text>
+    </g>
+
+    <!-- Default status bar -->
+    <path d="M0,320 L680,320 L680,338 Q680,350 668,350 L12,350 Q0,350 0,338 Z" fill="#007acc"/>
+    <text x="16" y="339" font-size="11" fill="rgba(255,255,255,0.5)" class="sans">Board</text>
+
+    <!-- Active status bar (fades in over default) -->
+    <g class="d-sb">
+      <path d="M0,320 L680,320 L680,338 Q680,350 668,350 L12,350 Q0,350 0,338 Z" fill="#0ea5e9"/>
+      <circle cx="16" cy="335" r="3.5" fill="#fff" class="pulse"/>
+      <text x="28" y="339" font-size="11" font-weight="500" fill="#fff" class="sans">Board: jbloggs</text>
+      <text x="142" y="339" font-size="11" fill="rgba(255,255,255,0.7)" class="sans">connected</text>
+      <text x="664" y="339" text-anchor="end" font-size="11" fill="rgba(255,255,255,0.7)"
+            class="sans">&#x2194; 3 ports forwarded</text>
+    </g>
+  </g>
+</svg>

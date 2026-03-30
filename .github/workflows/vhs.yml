@@ -1,0 +1,55 @@
+name: Record VHS Tapes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "docs/vhs/*.tape"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  record:
+    name: Record GIFs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install VHS
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update && sudo apt-get install -y vhs
+
+      - name: Install ttyd and gum
+        run: sudo apt-get install -y ttyd gum
+
+      - name: Record tapes
+        run: |
+          mkdir -p docs/vhs/output
+          for tape in docs/vhs/*.tape; do
+            [ -f "$tape" ] || continue
+            echo "Recording $tape"
+            vhs "$tape"
+          done
+
+      - name: Create PR if GIFs changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/vhs/output/*.gif 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            BRANCH="chore/update-vhs-$(date +%Y%m%d-%H%M%S)"
+            git checkout -b "$BRANCH"
+            git commit -m "chore: update recorded GIFs"
+            git push origin "$BRANCH"
+            gh pr create --title "chore: update recorded GIFs" \
+              --body "Automated VHS recording update." \
+              --base main --head "$BRANCH"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

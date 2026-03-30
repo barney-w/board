@@ -1,0 +1,67 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the details below to help us investigate.
+
+  - type: input
+    id: version
+    attributes:
+      label: Board Version
+      description: Run `board --version` or check `cat /etc/board-release` on your dev VM.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cloud-provider
+    attributes:
+      label: Cloud Provider
+      description: Which cloud provider are you using?
+      options:
+        - Azure
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: The OS of your dev VM or local machine.
+      placeholder: "Ubuntu 24.04 / macOS 15 / Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: check-output
+    attributes:
+      label: Health Check Output
+      description: Paste the output of `just check` or the health check command.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide the steps needed to reproduce this bug.
+      placeholder: |
+        1. Run `just board`
+        2. Select project 'example'
+        3. See error...
+    validations:
+      required: true

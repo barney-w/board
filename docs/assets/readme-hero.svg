@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <defs>
+    <style>
+      @keyframes ballWaveBack {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-100px); }
+      }
+      @keyframes ballWaveFront {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-100px); }
+      }
+      @keyframes ballBob {
+        0%, 100% { transform: translateY(4px); }
+        50% { transform: translateY(-4px); }
+      }
+      @keyframes shimmer {
+        0%, 100% { opacity: 0.10; }
+        50% { opacity: 0.18; }
+      }
+      @keyframes fadeIn {
+        0% { opacity: 0; transform: translateY(6px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+
+      .ball-bob { animation: ballBob 10s ease-in-out infinite; }
+      .ball-wave-back { animation: ballWaveBack 8s linear infinite; }
+      .ball-wave-front { animation: ballWaveFront 5s linear infinite; }
+      .highlight { animation: shimmer 4s ease-in-out infinite; }
+      .title { animation: fadeIn 1.6s ease-out both; }
+      .tagline { animation: fadeIn 1.6s ease-out 0.35s both; }
+    </style>
+
+    <!-- Deep background -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#050810"/>
+      <stop offset="100%" stop-color="#0a1020"/>
+    </linearGradient>
+
+    <!-- Title gradient -->
+    <linearGradient id="title-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f0f9ff"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+
+    <!-- Ball (original proven values) -->
+    <clipPath id="ballClip">
+      <circle cx="400" cy="42" r="16"/>
+    </clipPath>
+    <linearGradient id="ballGradBack" x1="0" x2="0"
+                    gradientUnits="userSpaceOnUse" y1="26" y2="58">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.40"/>
+    </linearGradient>
+    <linearGradient id="ballGradFront" x1="0" x2="0"
+                    gradientUnits="userSpaceOnUse" y1="26" y2="58">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.50"/>
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" fill="url(#bg)" rx="12"/>
+
+  <!-- Subtle grid dots -->
+  <g opacity="0.06">
+    <pattern id="dots" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="0.8" fill="#7dd3fc"/>
+    </pattern>
+    <rect width="800" height="200" fill="url(#dots)" rx="12"/>
+  </g>
+
+  <!-- Soft radial glow behind logo area -->
+  <radialGradient id="glow" cx="400" cy="90" r="180" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.07"/>
+    <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="800" height="200" fill="url(#glow)" rx="12"/>
+
+  <!-- ═══ Wave Ball (original animation) ═══ -->
+  <g clip-path="url(#ballClip)">
+    <g class="ball-bob">
+      <g class="ball-wave-back">
+        <path d="M300,39 C312,37.5 324,35 336,36
+                 C348,37 356,41 368,42
+                 C380,43 388,40.5 400,39
+                 C412,37.5 424,35 436,36
+                 C448,37 456,41 468,42
+                 C480,43 488,40.5 500,39
+                 C512,37.5 524,35 536,36
+                 C548,37 556,41 568,42
+                 C580,43 588,40.5 600,39
+                 V66 H300 Z"
+              fill="url(#ballGradBack)"/>
+      </g>
+      <g class="ball-wave-front">
+        <path d="M300,42 C310,40.5 322,39.5 335,40.5
+                 C348,41.5 358,44 370,44.5
+                 C382,45 390,43.5 400,42
+                 C410,40.5 422,39.5 435,40.5
+                 C448,41.5 458,44 470,44.5
+                 C482,45 490,43.5 500,42
+                 C510,40.5 522,39.5 535,40.5
+                 C548,41.5 558,44 570,44.5
+                 C582,45 590,43.5 600,42
+                 V66 H300 Z"
+              fill="url(#ballGradFront)"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Ball ring -->
+  <circle cx="400" cy="42" r="16" fill="none" stroke="#38bdf8" stroke-width="0.8" opacity="0.25"/>
+
+  <!-- 3D highlight -->
+  <ellipse cx="396.5" cy="36.4" rx="4.5" ry="2.2" transform="rotate(-20 396.5 36.4)"
+           fill="white" class="highlight"/>
+
+  <!-- ═══ Typography ═══ -->
+  <text x="400" y="110" text-anchor="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="52" font-weight="700" fill="url(#title-fill)"
+        letter-spacing="0.06em" class="title">Board</text>
+
+  <text x="400" y="148" text-anchor="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+        font-size="15" fill="#64748b"
+        letter-spacing="0.04em" class="tagline">Dev environments that just work</text>
+</svg>
