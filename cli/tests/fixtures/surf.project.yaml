@@ -1,0 +1,127 @@
+# projects/surf.project.yaml
+
+name: surf
+description: AI platform (Python/FastAPI + Postgres)
+repo: https://github.com/barney-w/surf
+path: ~/projects/surf # default: ~/projects/<name>
+
+# ── System requirements (validated before provisioning) ──
+requires:
+  tools: [python3, uv, docker]
+  cloud_init: true # wait for cloud-init before provisioning
+
+# ── Dependency installation (idempotent commands) ──
+install:
+  - label: API dependencies
+    run: cd api && uv sync
+  - label: Ingestion dependencies
+    run: cd ingestion && uv sync
+
+# ── Docker services (managed via docker compose) ──
+docker:
+  compose_file: docker-compose.yml # relative to project path
+  containers:
+    - name: surf-postgres
+      restart_policy: unless-stopped
+      health_cmd: pg_isready -U surf -d surf
+      health_interval: 2
+      health_timeout: 60
+
+# ── Post-docker setup (runs after containers are healthy) ──
+post_docker:
+  - label: Run database migrations
+    run: cd api && uv run alembic upgrade head
+
+# ── Long-running app services (systemd user units) ──
+services:
+  - name: surf-api
+    description: Surf API server
+    exec: api/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8090
+    working_dir: api
+    env_file: .env # relative to project path
+    extra_path: api/.venv/bin
+    health_url: http://localhost:8090/api/v1/health
+    health_timeout: 15
+
+# ── Environment variables ──
+env:
+  file: .env # target file, relative to project path
+  fallback: .env.example # copy this if no Key Vault available
+
+  # Secrets pulled from Azure Key Vault
+  keyvault_secrets:
+    ANTHROPIC_API_KEY: anthropic-api-key
+    AZURE_OPENAI_ENDPOINT: azure-openai-endpoint
+    AZURE_SEARCH_ENDPOINT: azure-search-endpoint
+    AZURE_SEARCH_INDEX_NAME: azure-search-index-name
+    AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+
+  # Always the same for local dev — no Key Vault needed
+  hardcoded:
+    POSTGRES_HOST: localhost
+    POSTGRES_PORT: "5432"
+    POSTGRES_DATABASE: surf
+    POSTGRES_USER: surf
+    POSTGRES_PASSWORD: localdev
+    ENVIRONMENT: dev
+    LOG_LEVEL: INFO
+    AUTH_ENABLED: "false"
+    ANTHROPIC_MODEL_ID: claude-haiku-4-5-20251001
+    ANTHROPIC_DOMAIN_MODEL_ID: claude-sonnet-4-6
+
+  # Secrets that are critical — provisioning warns loudly if missing
+  required:
+    - ANTHROPIC_API_KEY
+
+# ── VS Code integration ──
+vscode:
+  ports:
+    "8090": { label: "Surf API", auto_forward: notify }
+    "5432": { label: "Postgres", auto_forward: silent }
+
+  tasks:
+    - label: Restart API
+      command: systemctl --user restart surf-api && echo '✓ API restarted'
+    - label: View API Logs
+      command: journalctl --user -u surf-api -f --no-hostname -o cat
+      background: true
+    - label: Run Migrations
+      command: cd ${workspaceFolder}/api && uv run alembic upgrade head
+    - label: Health Check
+      command: check
+    - label: Postgres Shell
+      command: docker exec -it surf-postgres psql -U surf -d surf
+    - label: Stop API Service
+      command: systemctl --user stop surf-api && echo '✓ API stopped (port 8090 free for debugger)'
+
+  launch:
+    - name: Debug Surf API
+      type: debugpy
+      request: launch
+      module: uvicorn
+      args: ["src.main:app", "--host", "0.0.0.0", "--port", "8090", "--reload"]
+      cwd: api
+      env_file: .env
+      pre_launch_task: Stop API Service
+
+  settings:
+    python.defaultInterpreterPath: ./api/.venv/bin/python
+
+# ── Workspace panes (used by myterm to generate surf layout) ──
+workspace:
+  services:
+    - name: Surf API
+      command: journalctl --user -u surf-api -f --no-hostname -o cat
+    - name: Docker
+      command: docker compose logs -f
+
+# ── Health checks (used by `check` command and smoke tests) ──
+health:
+  - label: Postgres
+    check: docker exec surf-postgres pg_isready -U surf -d surf
+    port: 5432
+  - label: Surf API
+    check: curl -sf http://localhost:8090/api/v1/health
+    port: 8090
+  - label: Alembic migrations
+    check: cd ~/projects/surf/api && uv run alembic check 2>/dev/null || uv run alembic current 2>&1 | grep -q head

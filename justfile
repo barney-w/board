@@ -2,6 +2,9 @@
 
 set dotenv-load := true
 
+# Python CLI invocation
+_board := "uv run --project cli board"
+
 # Defaults (overridable via env or CLI)
 default_env := "personal"
 default_sku := "Standard_D2s_v6"
@@ -12,198 +15,272 @@ default_region := "aue"
 
 # Board up — onboard a developer by provisioning a cloud dev environment
 board *args="":
-    @bash scripts/setup.sh {{args}}
+    @{{_board}} up {{args}}
+
+# Record a demo of the board wizard (no Azure credentials needed)
+demo:
+    @{{_board}} up --demo
 
 # Shape — shaper's control panel (manage boards, projects, and secrets)
 shape:
-    @bash scripts/admin.sh
+    @{{_board}} shape
 
 # ── Deployment ──
 
-# Deploy a new board
+# Deploy a new board (direct Bicep deploy, no wizard)
 create-vm name env=default_env sku=default_sku:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # Auto-resolve SSH_PUB_KEY if not set
-    if [[ -z "${SSH_PUB_KEY:-}" ]]; then
-        key_file="$HOME/.ssh/devvm-{{name}}.pub"
-        if [[ -f "$key_file" ]]; then
-            export SSH_PUB_KEY="$(cat "$key_file")"
-            echo "Using SSH key from $key_file"
-        else
-            echo "ERROR: SSH_PUB_KEY not set and ~/.ssh/devvm-{{name}}.pub not found."
-            echo "Fix: Run 'just generate-key {{name}}' first, or set SSH_PUB_KEY."
-            exit 1
-        fi
-    fi
-    # Clear known_hosts entry (handles redeploy case)
-    ssh-keygen -R "devvm-{{name}}.{{default_location}}.cloudapp.azure.com" 2>/dev/null || true
-    echo "Shaping board for {{name}} in {{env}} environment..."
-    az deployment group create \
-        --resource-group "rg-{{env}}-{{default_region}}-devvm" \
-        --template-file infra/main.bicep \
-        --parameters "infra/config/{{env}}.bicepparam" \
-        --parameters developerName='{{name}}' vmSku='{{sku}}' \
-        --name "deploy-{{name}}-$(date -u +%Y%m%d%H%M%S)" \
-        --verbose
-    echo "Board shaped. Run 'just ssh {{name}}' to connect."
+    @{{_board}} create-vm {{name}} --env {{env}} --sku {{sku}} --location {{default_location}} --region-short {{default_region}}
 
 # Create the resource group (run once per environment)
 create-rg env=default_env:
-    az group create \
-        --name rg-{{env}}-{{default_region}}-devvm \
-        --location {{default_location}} \
-        --tags project=devvm environment={{env}} managed-by=bicep
+    @{{_board}} create-rg --env {{env}} --location {{default_location}} --region-short {{default_region}}
 
 # Validate Bicep without deploying
 validate env=default_env:
-    az deployment group validate \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --template-file infra/main.bicep \
-        --parameters infra/config/{{env}}.bicepparam
+    @{{_board}} validate --env {{env}} --region-short {{default_region}}
 
 # Preview what would change
 what-if name env=default_env:
-    az deployment group what-if \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --template-file infra/main.bicep \
-        --parameters infra/config/{{env}}.bicepparam \
-        --parameters developerName='{{name}}'
+    @{{_board}} what-if {{name}} --env {{env}} --region-short {{default_region}}
 
 # ── VM Operations ──
 
 # Start a board
 start name env=default_env:
-    az vm start \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --name vm-{{env}}-{{default_region}}-devvm-{{name}} \
-        --no-wait
-    @echo "Board starting. Give it ~30s then run 'just ssh {{name}}'."
+    @{{_board}} vm start {{name}} --env {{env}}
 
 # Stop (deallocate) a board
 stop name env=default_env:
-    az vm deallocate \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --name vm-{{env}}-{{default_region}}-devvm-{{name}} \
-        --no-wait
-    @echo "Board deallocating. Compute charges will stop."
+    @{{_board}} vm stop {{name}} --env {{env}}
 
 # SSH into a board
-ssh name env=default_env:
-    ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
+ssh name:
+    @{{_board}} vm ssh {{name}}
+
+# SSH via Entra ID (work tenant)
+ssh-entra name env=default_env:
+    az ssh vm \
+        --resource-group rg-{{env}}-{{default_region}}-devvm \
+        --name vm-{{env}}-{{default_region}}-devvm-{{name}}
 
 # Show board status
 status name env=default_env:
-    az vm get-instance-view \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --name vm-{{env}}-{{default_region}}-devvm-{{name}} \
-        --query '{name:name, status:instanceView.statuses[1].displayStatus, ip:publicIps}' \
-        --output table
+    @{{_board}} vm status {{name}} --env {{env}}
 
 # List all boards and their status
 list env=default_env:
-    az vm list \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --show-details \
-        --query '[].{name:name, status:powerState, ip:publicIps, size:hardwareProfile.vmSize}' \
-        --output table
+    @{{_board}} vm ls --env {{env}}
 
 # ── Teardown ──
 
-# Delete a single board and all associated resources (pass confirm=yes to skip prompt)
+# Delete a single board and all associated resources
 delete-vm name env=default_env confirm="":
     #!/usr/bin/env bash
     set -euo pipefail
-    if [[ "{{confirm}}" != "yes" ]]; then
-        echo "WARNING: This will delete vm-{{env}}-{{default_region}}-devvm-{{name}} and all associated resources."
-        echo "Press Ctrl+C to cancel, or Enter to continue."
-        read _
+    if [[ "{{confirm}}" == "yes" ]]; then
+        {{_board}} vm delete {{name}} --env {{env}} --yes
+    else
+        {{_board}} vm delete {{name}} --env {{env}}
     fi
-    az vm delete \
-        --resource-group "rg-{{env}}-{{default_region}}-devvm" \
-        --name "vm-{{env}}-{{default_region}}-devvm-{{name}}" \
-        --force-deletion true \
-        --yes
-    # Delete orphaned PIP (not auto-deleted with VM)
-    az network public-ip delete \
-        --resource-group "rg-{{env}}-{{default_region}}-devvm" \
-        --name "pip-{{env}}-{{default_region}}-devvm-{{name}}" \
-        2>/dev/null || true
-    # Delete auto-shutdown schedule
-    az resource delete \
-        --resource-group "rg-{{env}}-{{default_region}}-devvm" \
-        --resource-type "Microsoft.DevTestLab/schedules" \
-        --name "shutdown-computevm-vm-{{env}}-{{default_region}}-devvm-{{name}}" \
-        2>/dev/null || true
-    # Clear known_hosts entry
-    ssh-keygen -R "devvm-{{name}}.{{default_location}}.cloudapp.azure.com" 2>/dev/null || true
-    echo "Board deleted (VM, NIC, OS disk, public IP, shutdown schedule)."
 
 # Delete entire environment (nuclear option, pass confirm=yes to skip prompt)
 destroy-all env=default_env confirm="":
     #!/usr/bin/env bash
     set -euo pipefail
-    RG="rg-{{env}}-{{default_region}}-devvm"
-    if [[ "{{confirm}}" != "yes" ]]; then
-        echo "WARNING: This will delete the ENTIRE resource group ${RG}."
-        echo "Press Ctrl+C to cancel, or Enter to continue."
-        read _
-    fi
-    # Check if RG exists at all
-    if ! az group show --name "$RG" &>/dev/null 2>&1; then
-        echo "Resource group ${RG} does not exist. Nothing to delete."
-        # Still purge any orphaned soft-deleted Key Vaults
-        for kv in $(az keyvault list-deleted --query "[?properties.vaultId && contains(properties.vaultId, '${RG}')].name" -o tsv 2>/dev/null || true); do
-            echo "Purging orphaned soft-deleted Key Vault: $kv"
-            az keyvault purge --name "$kv" 2>/dev/null || true
-        done
-        exit 0
-    fi
-    # Discover Key Vaults in the resource group before deleting (for soft-delete purge)
-    KV_NAMES=$(az keyvault list --resource-group "$RG" --query '[].name' -o tsv 2>/dev/null || true)
-    echo "Deleting resource group ${RG} (this may take a few minutes)..."
-    rc=0
-    az group delete --name "$RG" --yes || rc=$?
-    if (( rc == 130 )) || (( rc == 2 )); then
-        echo ""
-        echo "Wait cancelled — deletion is still running server-side on Azure."
-        echo "Check status:  az group show --name $RG --query properties.provisioningState -o tsv"
-        echo "Retry purge:   just destroy-all {{env}} confirm=yes"
-        exit 0
-    elif (( rc != 0 )); then
-        echo "ERROR: Resource group deletion failed (exit $rc). Check Azure portal."
-        exit 1
-    fi
-    echo "Resource group ${RG} deleted."
-    # Purge soft-deleted Key Vaults so names can be reused immediately
-    if [[ -n "$KV_NAMES" ]]; then
-        for kv in $KV_NAMES; do
-            echo "Purging soft-deleted Key Vault: $kv"
-            az keyvault purge --name "$kv" 2>/dev/null || true
-        done
-        echo "Key Vault purge complete."
+    if [[ "{{confirm}}" == "yes" ]]; then
+        {{_board}} destroy --env {{env}} --region-short {{default_region}} --yes
+    else
+        {{_board}} destroy --env {{env}} --region-short {{default_region}}
     fi
 
 # ── Utilities ──
 
 # Generate an SSH keypair for a dev
 generate-key name:
+    @{{_board}} vm keygen {{name}}
+
+# Run smoke tests against a deployed board
+smoke-test name:
+    @{{_board}} smoke-test {{name}}
+
+# Check cloud-init status on a board
+cloud-init-status name:
+    ssh -i ~/.ssh/devvm-{{name}} -o StrictHostKeyChecking=accept-new \
+        devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com \
+        'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
+
+# ── Developer Experience ──
+
+# Print SSH config block for a developer's local machine
+ssh-config name:
+    @{{_board}} ssh-config show {{name}}
+
+# Generate SSH config for Entra ID auth (work tenant)
+ssh-config-entra name env=default_env:
+    @echo "# Add this to ~/.ssh/config"
+    @echo ""
+    @echo "Host devvm-{{name}}"
+    @echo "    HostName devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    @echo "    User {{name}}@yourdomain.com"
+    @echo "    ProxyCommand az ssh proxy --resource-group rg-{{env}}-{{default_region}}-devvm --vm-name vm-{{env}}-{{default_region}}-devvm-{{name}} --port %p"
+    @echo "    ForwardAgent yes"
+    @echo "    ServerAliveInterval 60"
+    @echo "    ServerAliveCountMax 3"
+    @echo ""
+    @echo "# Usage:  ssh devvm-{{name}}"
+
+# First-time setup wizard (run on the board after first SSH login)
+setup-me name:
+    ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com 'bash ~/setup-me.sh'
+
+# Access code-server via SSH tunnel (opens browser IDE at localhost:8080)
+code-server name:
+    @echo "Opening SSH tunnel to code-server..."
+    @echo "Open http://localhost:8080 in your browser."
+    @PASS=$(ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com \
+        'cat ~/.board/code-server-password 2>/dev/null || echo "unknown"') && \
+        echo "Password: $PASS"
+    @echo ""
+    @echo "Press Ctrl+C to close the tunnel."
+    ssh -L 8080:localhost:8080 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
+
+# Set up VS Code Tunnel on a board (interactive GitHub auth)
+tunnel-setup name:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [[ -f "$HOME/.ssh/devvm-{{name}}" ]]; then
-        echo "SSH key already exists: ~/.ssh/devvm-{{name}}"
-        echo "Public key: $(cat "$HOME/.ssh/devvm-{{name}}.pub")"
-        exit 0
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    echo "Setting up VS Code Tunnel on devvm-{{name}}..."
+    if ! ssh -i "$KEY" -o ConnectTimeout=5 -o BatchMode=yes "devuser@${HOST}" \
+        "test -x /usr/local/bin/code" 2>/dev/null; then
+        echo "ERROR: VS Code CLI not installed on devvm-{{name}}."
+        exit 1
     fi
-    ssh-keygen -t ed25519 -C "devvm-{{name}}" -f "$HOME/.ssh/devvm-{{name}}" -N ""
-    echo "Public key:"
-    cat "$HOME/.ssh/devvm-{{name}}.pub"
+    ssh -t -i "$KEY" "devuser@${HOST}" \
+        '/usr/local/bin/code tunnel user login --provider github'
+    ssh -i "$KEY" "devuser@${HOST}" \
+        'sudo hostnamectl set-hostname "devvm-{{name}}"' || true
+    ssh -i "$KEY" "devuser@${HOST}" \
+        '/usr/local/bin/code tunnel service uninstall 2>/dev/null; true'
+    ssh -i "$KEY" "devuser@${HOST}" \
+        '/usr/local/bin/code tunnel service install --accept-server-license-terms && echo "https://vscode.dev/tunnel/devvm-{{name}}" > ~/.board/tunnel-url'
+    echo ""
+    echo "Tunnel ready: https://vscode.dev/tunnel/devvm-{{name}}"
+
+# Open VS Code Tunnel in browser
+tunnel-web name:
+    @open "https://vscode.dev/tunnel/devvm-{{name}}" 2>/dev/null || \
+        xdg-open "https://vscode.dev/tunnel/devvm-{{name}}" 2>/dev/null || \
+        echo "Open in browser: https://vscode.dev/tunnel/devvm-{{name}}"
+
+# Open a browser IDE for a board (interactive menu)
+browser-ide name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v gum &>/dev/null; then
+        CHOICE=$(gum choose "VS Code Tunnel (full marketplace, Copilot)" "code-server (self-hosted, SSH tunnel)")
+    else
+        echo "1) VS Code Tunnel (full marketplace, Copilot)"
+        echo "2) code-server (self-hosted, SSH tunnel)"
+        read -p "Choose [1-2]: " num
+        case "$num" in
+            1) CHOICE="VS Code Tunnel" ;;
+            *) CHOICE="code-server" ;;
+        esac
+    fi
+    case "$CHOICE" in
+        *"Tunnel"*)
+            just tunnel-web {{name}}
+            ;;
+        *"code-server"*)
+            just code-server {{name}}
+            ;;
+    esac
+
+# Grant Entra ID SSH access to a developer (work tenant)
+grant-ssh-access name email env=default_env:
+    az role assignment create \
+        --assignee "{{email}}" \
+        --role "Virtual Machine User Login" \
+        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-{{env}}-{{default_region}}-devvm"
+    @echo "{{name}} can now SSH via: az ssh vm --resource-group rg-{{env}}-{{default_region}}-devvm --name vm-{{env}}-{{default_region}}-devvm-{{name}}"
+
+# Build the VS Code extension (.vsix)
+build-extension:
+    cd extension && npm run build:prod && npx @vscode/vsce package --no-dependencies
+
+# Create a starter kit (board pass + extension + setup scripts) for a developer
+export-pass name env=default_env:
+    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}}
+
+# ── Project Operations ──
+
+# Install projects on a board from manifest files
+install-projects name keyvault="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CMD="{{_board}} install-projects {{name}}"
+    [[ -n "{{keyvault}}" ]] && CMD="$CMD --keyvault {{keyvault}}"
+    $CMD
+
+# Check project service health on a board
+project-status name:
+    @{{_board}} project-status {{name}}
+
+# ── Fleet Operations ──
+
+# Show status of all boards in an environment
+fleet-status env=default_env:
+    @{{_board}} fleet --env {{env}}
+
+# Auto-detect project stack and generate a manifest
+init:
+    @{{_board}} init
+
+# ── Automation ──
+
+# Write SSH config block directly to ~/.ssh/config (idempotent, managed markers)
+ssh-config-write name:
+    @{{_board}} ssh-config write {{name}}
+
+# Remove SSH config block for a board
+ssh-config-remove name:
+    @{{_board}} ssh-config remove {{name}}
+
+# Wait for cloud-init to complete on a board (polls with progress)
+wait-ready name:
+    @{{_board}} wait-ready {{name}}
+
+# Preflight checks before deploying a board
+preflight name env=default_env sku=default_sku:
+    @{{_board}} preflight {{name}} --env {{env}} --sku {{sku}} --location {{default_location}} --region-short {{default_region}}
+
+# Provision a board from zero to ready (one command does everything)
+provision name env=default_env sku=default_sku:
+    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_ENVIRONMENT={{env}} BOARD_VM_SKU={{sku}} {{_board}} up --non-interactive
+
+# Rotate SSH key for a board (invalidates existing board passes)
+rotate-key name:
+    @{{_board}} rotate-key {{name}}
 
 # ── Static Analysis ──
 
-# Lint shell scripts with shellcheck
-lint-shell:
-    shellcheck -x -P scripts -P scripts/lib scripts/*.sh scripts/lib/*.sh
+# Lint Python code with ruff
+lint-python:
+    cd cli && uv run ruff check src/ tests/
+
+# Format Python code with ruff
+format-python:
+    cd cli && uv run ruff format src/ tests/
+
+# Build and lint Bicep templates
+lint-bicep:
+    az bicep build --file infra/main.bicep --stdout > /dev/null
+    az bicep lint --file infra/main.bicep
+
+# Validate cloud-init YAML schema
+lint-cloud-init:
+    cloud-init schema --config-file infra/cloud-init/cloud-init.yaml
 
 # Validate project manifest YAML syntax
 lint-manifests:
@@ -215,17 +292,66 @@ lint-manifests:
 # Run all static checks
 check:
     @echo "=== Static Analysis ==="
-    just lint-shell
+    just lint-python
     just lint-manifests
     @echo ""
     @echo "=== All checks passed ==="
 
 # ── Testing ──
 
-# Run all bats unit tests
-test:
-    bats tests/
+# Run Python unit tests
+test *args="":
+    cd cli && uv run pytest {{args}}
 
-# Run a specific test file
-test-one file:
-    bats tests/{{file}}.bats
+# Run tests with coverage
+test-cov:
+    cd cli && uv run pytest --cov=board --cov-report=term-missing
+
+# Dry run: validate setup inputs without touching Azure
+dry-run name="testuser":
+    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_ENVIRONMENT=personal {{_board}} up --dry-run --non-interactive
+
+# Test cloud-init locally (requires: brew install multipass, ~5-8 min)
+test-cloud-init:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v multipass &>/dev/null; then
+        echo "ERROR: multipass not installed. Install: brew install multipass"
+        exit 1
+    fi
+    VM_NAME="board-ci-test"
+    multipass delete "$VM_NAME" --purge 2>/dev/null || true
+    echo "Launching Ubuntu 24.04 with cloud-init..."
+    multipass launch 24.04 --name "$VM_NAME" \
+        --cloud-init infra/cloud-init/cloud-init.yaml \
+        --cpus 2 --memory 4G --disk 20G
+    echo "Waiting for cloud-init (this takes 5-8 minutes)..."
+    multipass exec "$VM_NAME" -- cloud-init status --wait
+    echo ""
+    echo "=== Tool Verification ==="
+    PASS=0; FAIL=0
+    for cmd in git python3 node docker just jq yq; do
+        if multipass exec "$VM_NAME" -- command -v "$cmd" &>/dev/null; then
+            echo "  OK  $cmd"
+            ((PASS++))
+        else
+            echo "  FAIL $cmd"
+            ((FAIL++))
+        fi
+    done
+    echo ""
+    echo "=== Results: $PASS passed, $FAIL failed ==="
+    multipass delete "$VM_NAME" --purge
+    [ "$FAIL" -eq 0 ]
+
+# ── Help ──
+
+# Show board CLI help
+help:
+    @{{_board}} --help
+
+# ── Backward Compatibility Aliases ──
+alias setup := board
+alias admin := shape
+alias export-bundle := export-pass
+alias provision-projects := install-projects

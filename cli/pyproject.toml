@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "board"
+version = "2.0.0"
+description = "CLI tool for provisioning Azure developer VMs"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "questionary>=2.1",
+    "rich>=14.0",
+    "asyncssh>=2.22",
+    "ruamel.yaml>=0.18",
+    "pydantic>=2.10",
+    "cryptography>=44.0",
+    "httpx>=0.28",
+    "azure-identity>=1.19",
+    "azure-mgmt-resource>=23.3",
+    "azure-mgmt-compute>=34.0",
+    "azure-mgmt-network>=28.0",
+    "azure-mgmt-keyvault>=10.4",
+    "azure-keyvault-secrets>=4.9",
+    "azure-mgmt-authorization>=4.0",
+    "azure-mgmt-resource-deployments>=1.0.0b1",
+    "aiohttp>=3.13.4",
+]
+
+[project.scripts]
+board = "board.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/board"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+ignore = ["E501"]  # Line length handled by formatter; embedded bash/test strings exceed 100

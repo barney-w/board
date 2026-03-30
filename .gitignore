@@ -34,6 +34,10 @@ extension/node_modules/
 extension/dist/
 extension/out/
 extension/.vscode-test/
+extension/test/**/*.js
+extension/test/**/*.js.map
+extension/vitest.config.js
+extension/vitest.config.js.map
 *.vsix
 
 # Board pass / starter kit output
@@ -44,9 +48,35 @@ extension/.vscode-test/
 tests/test_helper/bats-support/
 tests/test_helper/bats-assert/
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg
+htmlcov/
+.coverage
+
+# Claude Code
+.claude/
+
+# VHS tape source files (output GIFs are tracked)
+docs/vhs/*.tape
+
 # Integration test keys
 tests/integration/test-key
 tests/integration/test-key.pub
 
-# Node
-node_modules/
+# Internal planning & launch docs
+docs/launch/
+docs/plans/
+
+# Personal workspace config
+myterm.toml
+
+# Starter kit build output
+*-board/
