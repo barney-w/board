@@ -8,7 +8,7 @@ import { BundlePayload } from './bundle';
 export function showBoardPassCard(
   context: vscode.ExtensionContext,
   payload: BundlePayload,
-  bundleUri: vscode.Uri,
+  bundleUri?: vscode.Uri,
 ): vscode.WebviewPanel {
   const panel = vscode.window.createWebviewPanel(
     'boardPassCard',
@@ -17,7 +17,7 @@ export function showBoardPassCard(
     { enableScripts: true },
   );
 
-  panel.webview.html = getBoardPassHtml(payload);
+  panel.webview.html = getBoardPassHtml(payload, !!bundleUri);
 
   panel.webview.onDidReceiveMessage(
     async (message) => {
@@ -27,8 +27,10 @@ export function showBoardPassCard(
           await vscode.commands.executeCommand('board.connect');
           break;
         case 'deleteFile':
-          await vscode.workspace.fs.delete(bundleUri);
-          panel.webview.postMessage({ command: 'fileDeleted' });
+          if (bundleUri) {
+            await vscode.workspace.fs.delete(bundleUri);
+            panel.webview.postMessage({ command: 'fileDeleted' });
+          }
           break;
       }
     },
@@ -86,12 +88,12 @@ function generateAvatar(name: string): string {
   </svg>`;
 }
 
-function getBoardPassHtml(payload: BundlePayload): string {
+export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = true): string {
   const expired = isExpired(payload.validUntil);
   const remaining = daysRemaining(payload.validUntil);
   const barcode = generateBarcode(payload.developerName + payload.hostname);
   const avatar = generateAvatar(payload.developerName);
-  const hasBrowserIde = !!(payload.browserIde?.vscodeTunnel?.url || payload.browserIde?.codeServer);
+  const hasBrowserIde = !!payload.browserIde?.codeServer;
 
   // Shield SVG icon for the header
   const shieldIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>`;
@@ -593,7 +595,6 @@ function getBoardPassHtml(payload: BundlePayload): string {
             <div class="field-label">Clearance</div>
             <div class="clearance">
               <span class="clearance-chip"><span class="clearance-dot"></span>SSH Terminal</span>
-              ${hasBrowserIde && payload.browserIde?.vscodeTunnel?.url ? '<span class="clearance-chip"><span class="clearance-dot"></span>VS Code Tunnel</span>' : ''}
               ${hasBrowserIde && payload.browserIde?.codeServer ? '<span class="clearance-chip"><span class="clearance-dot"></span>code-server</span>' : ''}
             </div>
           </div>
@@ -627,7 +628,7 @@ function getBoardPassHtml(payload: BundlePayload): string {
     <!-- Actions below card -->
     <div class="actions">
       <button class="btn btn-connect" id="connectBtn">Connect Now</button>
-      <button class="btn btn-delete" id="deleteBtn">Delete Pass File</button>
+      ${showDelete ? '<button class="btn btn-delete" id="deleteBtn">Delete Pass File</button>' : ''}
     </div>
   </div>
 
@@ -638,15 +639,17 @@ function getBoardPassHtml(payload: BundlePayload): string {
       vscode.postMessage({ command: 'connect' });
     });
 
-    document.getElementById('deleteBtn').addEventListener('click', () => {
-      vscode.postMessage({ command: 'deleteFile' });
-    });
+    const deleteBtn = document.getElementById('deleteBtn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'deleteFile' });
+      });
+    }
 
     window.addEventListener('message', (event) => {
-      if (event.data.command === 'fileDeleted') {
-        const btn = document.getElementById('deleteBtn');
-        btn.textContent = 'Deleted';
-        btn.classList.add('deleted');
+      if (event.data.command === 'fileDeleted' && deleteBtn) {
+        deleteBtn.textContent = 'Deleted';
+        deleteBtn.classList.add('deleted');
       }
     });
   </script>

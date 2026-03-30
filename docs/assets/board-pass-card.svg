@@ -57,9 +57,9 @@
             fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
     </g>
 
-    <text x="52" y="28" font-size="13" font-weight="700" fill="white" letter-spacing="0.18em"
+    <text x="60" y="28" font-size="13" font-weight="700" fill="white" letter-spacing="0.18em"
           class="sans">B O A R D &#160; P A S S</text>
-    <text x="52" y="44" font-size="10" fill="rgba(255,255,255,0.7)" letter-spacing="0.08em"
+    <text x="60" y="44" font-size="10" fill="rgba(255,255,255,0.7)" letter-spacing="0.08em"
           class="sans">ACCESS CREDENTIAL</text>
 
     <!-- ═══ Card body ═══ -->
@@ -115,13 +115,9 @@
       <circle cx="44" cy="272" r="3.5" fill="#22c55e"/>
       <text x="54" y="277" font-size="11" fill="#94a3b8" class="sans">SSH Terminal</text>
 
-      <rect x="160" y="260" width="140" height="24" rx="12" fill="#1e293b"/>
+      <rect x="160" y="260" width="120" height="24" rx="12" fill="#1e293b"/>
       <circle cx="176" cy="272" r="3.5" fill="#22c55e"/>
-      <text x="186" y="277" font-size="11" fill="#94a3b8" class="sans">VS Code Tunnel</text>
-
-      <rect x="312" y="260" width="120" height="24" rx="12" fill="#1e293b"/>
-      <circle cx="328" cy="272" r="3.5" fill="#22c55e"/>
-      <text x="338" y="277" font-size="11" fill="#94a3b8" class="sans">code-server</text>
+      <text x="186" y="277" font-size="11" fill="#94a3b8" class="sans">code-server</text>
 
       <!-- ═══ Perforation ═══ -->
       <!-- Circular cutouts on edges -->

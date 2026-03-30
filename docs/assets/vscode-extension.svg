@@ -47,7 +47,7 @@
     <tspan fill="#dcdcaa"> Board: Connect</tspan>
   </text>
   <text x="652" y="105" text-anchor="end"
-        font-family="system-ui, -apple-system, sans-serif" font-size="11.5" fill="#6a737d">one-click SSH tunnel + port forwarding</text>
+        font-family="system-ui, -apple-system, sans-serif" font-size="11.5" fill="#6a737d">one-click SSH + port forwarding</text>
 
   <!-- Item 3: Health Check -->
   <rect x="52" y="124" width="614" height="32" rx="4" fill="#2a2d36"/>

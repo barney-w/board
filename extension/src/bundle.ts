@@ -90,7 +90,8 @@ export async function decryptBundle(
 export async function importBundle(
   context: vscode.ExtensionContext,
   fileUri?: vscode.Uri,
-): Promise<void> {
+  options?: { showCard?: boolean },
+): Promise<BundlePayload | undefined> {
   // Check if current auth method is entra-id — bundle import is for SSH key auth only
   const currentConfig = getConfig();
   if (currentConfig.authMethod === 'entra-id' && isConfigured()) {
@@ -227,12 +228,16 @@ export async function importBundle(
   }
 
   // 11-12. Show the boarding pass card (handles delete + connect)
-  showBoardPassCard(context, payload, bundleUri);
+  if (options?.showCard !== false) {
+    showBoardPassCard(context, payload, bundleUri);
 
-  // 13. Open the Get Started walkthrough so users see next steps
-  vscode.commands.executeCommand(
-    'workbench.action.openWalkthrough',
-    'barney-w.board#board.getStarted',
-    false,
-  );
+    // 13. Open the Get Started walkthrough so users see next steps
+    vscode.commands.executeCommand(
+      'workbench.action.openWalkthrough',
+      'barney-w.board#board.getStarted',
+      false,
+    );
+  }
+
+  return payload;
 }

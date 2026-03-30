@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getConfig, isConfigured, getSshHostAlias, getHostname, getResourceGroup, getVmName, getPortalUrl, getTunnelUrl } from './config';
+import { getConfig, isConfigured, getSshHostAlias, getHostname, getResourceGroup, getVmName, getPortalUrl } from './config';
 import { writeSshConfig } from './ssh';
 import { connect } from './connection';
 import { importBundle, BundlePayload } from './bundle';
@@ -428,23 +428,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // ---- board.openTunnel ----
-  context.subscriptions.push(
-    vscode.commands.registerCommand('board.openTunnel', () => {
-      if (!isConfigured()) {
-        vscode.window.showWarningMessage('Configure Board first.');
-        return;
-      }
-      const config = getConfig();
-      const url = getTunnelUrl(config);
-      if (!url) {
-        vscode.window.showWarningMessage('No tunnel URL configured.');
-        return;
-      }
-      vscode.env.openExternal(vscode.Uri.parse(url));
-    }),
-  );
-
   // ---- board.openCodeServer ----
   context.subscriptions.push(
     vscode.commands.registerCommand('board.openCodeServer', async () => {
@@ -470,53 +453,6 @@ export function activate(context: vscode.ExtensionContext): void {
       }, 2000);
 
       // No password needed — code-server uses auth:none (SSH tunnel is the auth)
-    }),
-  );
-
-  // ---- board.openInBrowser ----
-  context.subscriptions.push(
-    vscode.commands.registerCommand('board.openInBrowser', async () => {
-      if (!isConfigured()) {
-        vscode.window.showWarningMessage('Configure Board first.');
-        return;
-      }
-      const config = getConfig();
-      const tunnelUrl = getTunnelUrl(config);
-
-      const items: vscode.QuickPickItem[] = [];
-      if (tunnelUrl) {
-        items.push({
-          label: '$(globe) VS Code Tunnel',
-          description: 'Full marketplace, Copilot, GitHub auth',
-          detail: tunnelUrl,
-        });
-      }
-      items.push({
-        label: '$(terminal) code-server',
-        description: 'Self-hosted, Open VSX, no login required',
-        detail: 'Opens SSH tunnel + http://localhost:8080',
-      });
-
-      if (items.length === 1) {
-        // Only code-server available (no tunnel URL)
-        await vscode.commands.executeCommand('board.openCodeServer');
-        return;
-      }
-
-      const choice = await vscode.window.showQuickPick(items, {
-        title: 'Open in Browser',
-        placeHolder: 'Choose a browser IDE',
-      });
-
-      if (!choice) {
-        return;
-      }
-
-      if (choice.label.includes('Tunnel')) {
-        await vscode.commands.executeCommand('board.openTunnel');
-      } else {
-        await vscode.commands.executeCommand('board.openCodeServer');
-      }
     }),
   );
 

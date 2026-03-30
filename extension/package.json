@@ -29,9 +29,7 @@
       { "command": "board.runSetup", "title": "Board: Run First-Time Setup" },
       { "command": "board.openPortal", "title": "Board: Open in Azure Portal" },
       { "command": "board.openTerminal", "title": "Board: Open Terminal" },
-      { "command": "board.openInBrowser", "title": "Board: Open in Browser", "icon": "$(globe)" },
-      { "command": "board.openCodeServer", "title": "Board: Open code-server" },
-      { "command": "board.openTunnel", "title": "Board: Open VS Code Tunnel" },
+      { "command": "board.openCodeServer", "title": "Board: Open code-server", "icon": "$(globe)" },
       { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" },
       { "command": "board.cheatsheet", "title": "Board: Cheatsheet", "icon": "$(book)" }
     ],
@@ -86,11 +84,6 @@
           "minimum": 10,
           "maximum": 600,
           "description": "How often to poll VM status (seconds)"
-        },
-        "board.tunnelUrl": {
-          "type": "string",
-          "default": "",
-          "description": "VS Code Tunnel URL for browser access (auto-populated from board pass)"
         }
       }
     },

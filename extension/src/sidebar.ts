@@ -139,8 +139,8 @@ export class QuickActionsProvider implements vscode.TreeDataProvider<ActionItem>
     items.push(new ActionItem('Run First-Time Setup', 'gear', 'board.runSetup'));
 
     if (isConfigured()) {
-      const browserItem = new ActionItem('Open in Browser', 'globe', 'board.openInBrowser');
-      browserItem.tooltip = 'Open your board in a browser-based IDE';
+      const browserItem = new ActionItem('Open code-server', 'globe', 'board.openCodeServer');
+      browserItem.tooltip = 'Open code-server in your browser';
       items.push(browserItem);
     }
 
@@ -185,7 +185,7 @@ export class CheatsheetProvider implements vscode.TreeDataProvider<CheatsheetIte
       new CheatsheetItem('Connect', vscode.TreeItemCollapsibleState.None, { description: 'open remote window', icon: 'remote', command: 'board.connect' }),
       new CheatsheetItem('Start / Stop', vscode.TreeItemCollapsibleState.None, { description: 'power-manage VM', icon: 'play', command: 'board.start' }),
       new CheatsheetItem('First-Time Setup', vscode.TreeItemCollapsibleState.None, { description: 'Git + SSH keys', icon: 'gear', command: 'board.runSetup' }),
-      new CheatsheetItem('Open in Browser', vscode.TreeItemCollapsibleState.None, { description: 'Tunnel or code-server', icon: 'globe', command: 'board.openInBrowser' }),
+      new CheatsheetItem('Open code-server', vscode.TreeItemCollapsibleState.None, { description: 'Browser IDE', icon: 'globe', command: 'board.openCodeServer' }),
     ];
 
     const termCmds = new CheatsheetItem('Terminal Commands', vscode.TreeItemCollapsibleState.Expanded, { icon: 'terminal' });
