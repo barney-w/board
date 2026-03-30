@@ -446,7 +446,7 @@ async def _run_up(
                 str(key_path),
                 user="devuser",
                 fallback_ip=public_ip,
-                console=con,
+                console=con.console,
             )
         cloud_init_elapsed = time.monotonic() - cloud_init_start
         con.phase_timing("Tools installed", cloud_init_elapsed)
@@ -474,7 +474,7 @@ async def _run_up(
                 success_count, fail_count = await provision_projects(
                     ssh=ssh,
                     manifest_dir=manifest_dir,
-                    console=con,
+                    console=con.console,
                     keyvault_name=kv_name,
                     filter_names=selected_projects,
                 )

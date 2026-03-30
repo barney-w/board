@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ruamel.yaml import YAML
 
@@ -90,11 +90,11 @@ def generate_vscode_tasks(manifest: ProjectManifest) -> str:
 
     Matches ``manifest_generate_vscode_tasks()`` in manifest.sh.
     """
-    tasks_list: list[dict] = []
+    tasks_list: list[dict[str, Any]] = []
 
     if manifest.vscode:
         for task in manifest.vscode.tasks:
-            entry: dict = {
+            entry: dict[str, Any] = {
                 "label": task.label,
                 "type": "shell",
                 "command": task.command,
@@ -115,11 +115,11 @@ def generate_vscode_launch(manifest: ProjectManifest) -> str:
 
     Matches ``manifest_generate_vscode_launch()`` in manifest.sh.
     """
-    configs: list[dict] = []
+    configs: list[dict[str, Any]] = []
 
     if manifest.vscode:
         for lc in manifest.vscode.launch:
-            entry: dict = {
+            entry: dict[str, Any] = {
                 "name": lc.name,
                 "type": lc.type,
                 "request": lc.request,
@@ -155,8 +155,8 @@ def generate_workspace(manifests: list[ProjectManifest]) -> str:
 
     Matches ``manifest_generate_workspace()`` in manifest.sh.
     """
-    folders: list[dict] = []
-    ports: dict[str, dict] = {}
+    folders: list[dict[str, str]] = []
+    ports: dict[str, dict[str, str]] = {}
 
     for m in manifests:
         # Derive folder name from path (last component)

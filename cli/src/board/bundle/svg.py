@@ -166,13 +166,9 @@ def render_board_pass_svg(
     <circle cx="44" cy="272" r="3.5" fill="#22c55e"/>
     <text x="54" y="277" font-size="11" fill="#94a3b8" class="sans">SSH Terminal</text>
 
-    <rect x="160" y="260" width="140" height="24" rx="12" fill="#1e293b"/>
+    <rect x="160" y="260" width="120" height="24" rx="12" fill="#1e293b"/>
     <circle cx="176" cy="272" r="3.5" fill="#22c55e"/>
-    <text x="186" y="277" font-size="11" fill="#94a3b8" class="sans">VS Code Tunnel</text>
-
-    <rect x="312" y="260" width="120" height="24" rx="12" fill="#1e293b"/>
-    <circle cx="328" cy="272" r="3.5" fill="#22c55e"/>
-    <text x="338" y="277" font-size="11" fill="#94a3b8" class="sans">code-server</text>
+    <text x="186" y="277" font-size="11" fill="#94a3b8" class="sans">code-server</text>
 
     <!-- Perforation -->
     <circle cx="0" cy="306" r="8" fill="#0f1219"/>

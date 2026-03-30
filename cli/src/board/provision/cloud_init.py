@@ -179,7 +179,12 @@ async def wait_for_cloud_init(
                             check=False,
                         )
                         if detail.stdout:
-                            for line in detail.stdout.strip().split("\n"):
+                            detail_out = (
+                                detail.stdout.decode()
+                                if isinstance(detail.stdout, bytes)
+                                else detail.stdout
+                            )
+                            for line in detail_out.strip().split("\n"):
                                 console.info(f"  {line}")
                         console.info(
                             "View log: board vm ssh <name>, then: "
@@ -197,7 +202,11 @@ async def wait_for_cloud_init(
                         "| grep -v '^$' | tail -1 | tr -cd '[:print:] ' | cut -c1-80",
                         check=False,
                     )
-                    progress = progress_result.stdout.strip() if progress_result.stdout else ""
+                    progress_raw = progress_result.stdout if progress_result.stdout else ""
+                    progress_str = (
+                        progress_raw.decode() if isinstance(progress_raw, bytes) else progress_raw
+                    )
+                    progress = progress_str.strip()
                     if not progress:
                         progress = "Installing development tools..."
                     if any(w in progress.lower() for w in ["complete", "ready for development"]):

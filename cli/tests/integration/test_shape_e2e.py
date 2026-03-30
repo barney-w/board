@@ -74,13 +74,9 @@ class TestBicepParameterNames:
 
         # A required param looks like: param developerName string
         # A param with default looks like: param vmSku string = 'Standard_D2s_v6'
-        all_params = re.findall(
-            r"^param\s+(\w+)\s+\w+\s*$", bicep_source, re.MULTILINE
-        )
+        all_params = re.findall(r"^param\s+(\w+)\s+\w+\s*$", bicep_source, re.MULTILINE)
         # Exclude @secure() params that are on a separate line
-        secure_params = re.findall(
-            r"@secure\(\)\s*\n\s*param\s+(\w+)\s+\w+", bicep_source
-        )
+        secure_params = re.findall(r"@secure\(\)\s*\n\s*param\s+(\w+)\s+\w+", bicep_source)
         required = set(all_params) | set(secure_params)
 
         setup_provides = {"developerName", "vmSku", "adminSshPublicKey", "environment"}
@@ -302,10 +298,12 @@ class TestDeployIntegration:
     @pytest.mark.asyncio
     async def test_deploy_with_all_setup_params(self) -> None:
         """Test deploy() with the exact parameters setup.py passes."""
-        result = _make_deployment_result({
-            "publicIpAddress": "20.1.2.3",
-            "fqdn": "vm-personal-aue-devvm-jbloggs.australiaeast.cloudapp.azure.com",
-        })
+        result = _make_deployment_result(
+            {
+                "publicIpAddress": "20.1.2.3",
+                "fqdn": "vm-personal-aue-devvm-jbloggs.australiaeast.cloudapp.azure.com",
+            }
+        )
         client = _make_sdk_client(result)
 
         with patch("board.azure.deployment.DeploymentsMgmtClient", return_value=client):
@@ -313,7 +311,9 @@ class TestDeployIntegration:
                 credential=MagicMock(),
                 subscription_id="sub-123",
                 resource_group="rg-personal-aue-devvm",
-                template={"$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"},
+                template={
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
+                },
                 parameters={
                     "developerName": "jbloggs",
                     "vmSku": "Standard_D2s_v6",
@@ -333,7 +333,9 @@ class TestDeployIntegration:
 
         assert arm_params["developerName"] == {"value": "jbloggs"}
         assert arm_params["vmSku"] == {"value": "Standard_D2s_v6"}
-        assert arm_params["adminSshPublicKey"] == {"value": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey"}
+        assert arm_params["adminSshPublicKey"] == {
+            "value": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey"
+        }
         assert arm_params["environment"] == {"value": "personal"}
 
     @pytest.mark.asyncio
@@ -397,15 +399,11 @@ class TestDeployIntegration:
                 provisioning_state="Succeeded",
             ),
             SimpleNamespace(
-                target_resource=SimpleNamespace(
-                    resource_type="Microsoft.Network/virtualNetworks"
-                ),
+                target_resource=SimpleNamespace(resource_type="Microsoft.Network/virtualNetworks"),
                 provisioning_state="Creating",
             ),
             SimpleNamespace(
-                target_resource=SimpleNamespace(
-                    resource_type="Microsoft.Compute/virtualMachines"
-                ),
+                target_resource=SimpleNamespace(resource_type="Microsoft.Compute/virtualMachines"),
                 provisioning_state="Running",
             ),
         ]
@@ -440,9 +438,7 @@ class TestDeployIntegration:
         """Same resource+state should only be reported once."""
         result = _make_deployment_result({})
         same_op = SimpleNamespace(
-            target_resource=SimpleNamespace(
-                resource_type="Microsoft.Network/virtualNetworks"
-            ),
+            target_resource=SimpleNamespace(resource_type="Microsoft.Network/virtualNetworks"),
             provisioning_state="Creating",
         )
         client = _make_sdk_client(
@@ -509,6 +505,7 @@ class TestDeployIntegration:
     @pytest.mark.asyncio
     async def test_deploy_timeout_includes_deployment_name(self) -> None:
         """Timeout error includes deployment name for portal debugging."""
+
         async def _hang_forever():
             await asyncio.Event().wait()
 
@@ -554,11 +551,13 @@ class TestDeployIntegration:
     @pytest.mark.asyncio
     async def test_deploy_result_extraction(self) -> None:
         """Outputs are correctly extracted from nested ARM format."""
-        result = _make_deployment_result({
-            "publicIpAddress": "20.1.2.3",
-            "fqdn": "vm.australiaeast.cloudapp.azure.com",
-            "sshCommand": "ssh devuser@vm.australiaeast.cloudapp.azure.com",
-        })
+        result = _make_deployment_result(
+            {
+                "publicIpAddress": "20.1.2.3",
+                "fqdn": "vm.australiaeast.cloudapp.azure.com",
+                "sshCommand": "ssh devuser@vm.australiaeast.cloudapp.azure.com",
+            }
+        )
         client = _make_sdk_client(result)
 
         with patch("board.azure.deployment.DeploymentsMgmtClient", return_value=client):

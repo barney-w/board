@@ -24,7 +24,7 @@ async def input_text(prompt: str, default: str = "") -> str:
     result = await questionary.text(prompt, default=default).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def input_validated(
@@ -47,7 +47,7 @@ async def input_validated(
     result = await questionary.text(prompt, default=default, validate=_validate).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def choose(prompt: str, choices: list[str], default: str = "") -> str:
@@ -63,7 +63,7 @@ async def choose(prompt: str, choices: list[str], default: str = "") -> str:
     result = await questionary.select(prompt, choices=choices, default=default or None).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def checklist(
@@ -82,7 +82,7 @@ async def checklist(
     result = await questionary.checkbox(prompt, choices=q_choices).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def confirm(prompt: str, default: bool = True) -> bool:
@@ -92,7 +92,7 @@ async def confirm(prompt: str, default: bool = True) -> bool:
     result = await questionary.confirm(prompt, default=default).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def secret(prompt: str) -> str:
@@ -102,7 +102,7 @@ async def secret(prompt: str) -> str:
     result = await questionary.password(prompt).ask_async()
     if result is None:
         raise KeyboardInterrupt
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def _prompt_to_env_key(prompt: str) -> str:

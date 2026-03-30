@@ -57,7 +57,7 @@ write_files:
 
       if [[ -n "$current_name" && -n "$current_email" ]]; then
           echo -e "  Git already configured: ${GREEN}$current_name <$current_email>${NC}"
-          read -p "  Change it? (y/N): " change_git
+          read -rp "  Change it? (y/N): " change_git
           if [[ "$change_git" != "y" && "$change_git" != "Y" ]]; then
               echo "  Keeping existing config."
           else
@@ -66,8 +66,8 @@ write_files:
       fi
 
       if [[ -z "$current_name" ]]; then
-          read -p "  Your full name (e.g. Jane Bloggs): " git_name
-          read -p "  Your email: " git_email
+          read -rp "  Your full name (e.g. Jane Bloggs): " git_name
+          read -rp "  Your email: " git_email
           git config --global user.name "$git_name"
           git config --global user.email "$git_email"
           echo -e "  ${GREEN}✓ Git configured: $git_name <$git_email>${NC}"
@@ -85,7 +85,7 @@ write_files:
           echo -e "  ${YELLOW}$(cat ~/.ssh/id_ed25519.pub)${NC}"
           echo ""
       else
-          read -p "  Generate an SSH key for Git hosting? (Y/n): " gen_key
+          read -rp "  Generate an SSH key for Git hosting? (Y/n): " gen_key
           if [[ "$gen_key" != "n" && "$gen_key" != "N" ]]; then
               email=$(git config --global user.email)
               ssh-keygen -t ed25519 -C "$email" -f ~/.ssh/id_ed25519 -N ""
@@ -104,8 +104,32 @@ write_files:
       fi
       echo ""
 
-      # ── Step 3: Tool verification ──
-      echo -e "${BOLD}Step 3: Verifying Tools${NC}"
+      # ── Step 3: GitHub authentication ──
+      echo -e "${BOLD}Step 3: GitHub Authentication${NC}"
+      echo ""
+
+      if gh auth status &>/dev/null 2>&1; then
+          echo -e "  ${GREEN}✓ Already authenticated with GitHub.${NC}"
+      else
+          echo "  GitHub CLI authentication enables Copilot and repo access."
+          read -rp "  Authenticate with GitHub now? (Y/n): " do_gh_auth
+          if [[ "$do_gh_auth" != "n" && "$do_gh_auth" != "N" ]]; then
+              gh auth login
+              if gh auth status &>/dev/null 2>&1; then
+                  echo -e "  ${GREEN}✓ GitHub authenticated.${NC}"
+                  # Install Copilot extension if not already present
+                  gh extension install github/gh-copilot 2>/dev/null || true
+              else
+                  echo -e "  ${YELLOW}Authentication skipped or failed. Run 'gh auth login' later.${NC}"
+              fi
+          else
+              echo "  Skipping. Run 'gh auth login' when you're ready."
+          fi
+      fi
+      echo ""
+
+      # ── Step 4: Tool verification ──
+      echo -e "${BOLD}Step 4: Verifying Tools${NC}"
       echo ""
 
       tools=(
@@ -121,6 +145,7 @@ write_files:
           "just:just --version"
           "neovim:nvim --version | head -1"
           "GitHub CLI:gh --version | head -1"
+          "GitHub Copilot CLI:gh copilot --version 2>/dev/null | head -1"
           "jq:jq --version"
       )
 
@@ -132,10 +157,10 @@ write_files:
           cmd="${tool#*:}"
           if output=$(eval "$cmd" 2>&1); then
               echo -e "  ${GREEN}✓${NC} $name → $output"
-              ((pass++))
+              pass=$((pass + 1))
           else
               echo -e "  ${RED}✗${NC} $name → not found or failed"
-              ((fail++))
+              fail=$((fail + 1))
           fi
       done
 
@@ -144,18 +169,18 @@ write_files:
       echo -e "  Checking Docker runs without sudo..."
       if docker run --rm hello-world &>/dev/null; then
           echo -e "  ${GREEN}✓${NC} Docker works without sudo"
-          ((pass++))
+          pass=$((pass + 1))
       else
           echo -e "  ${RED}✗${NC} Docker requires sudo — try logging out and back in"
-          ((fail++))
+          fail=$((fail + 1))
       fi
 
       echo ""
       echo -e "  ${BOLD}Results: ${GREEN}$pass passed${NC}, ${RED}$fail failed${NC}"
       echo ""
 
-      # ── Step 4: Quick orientation ──
-      echo -e "${BOLD}Step 4: Your Workspace${NC}"
+      # ── Step 5: Quick orientation ──
+      echo -e "${BOLD}Step 5: Your Workspace${NC}"
       echo ""
       if [[ -f ~/projects/board.code-workspace ]]; then
           echo "  Your projects are ready -- open board.code-workspace in VS Code"
@@ -366,7 +391,7 @@ runcmd:
     apt-get update
     apt-get install -y nodejs
 
-  # ── pnpm via corepack ──
+  # ── pnpm via corepack (pinned to match surf-kit packageManager field) ──
   - corepack enable
   - corepack prepare pnpm@10.33.0 --activate
 
@@ -395,6 +420,9 @@ runcmd:
       | tee /etc/apt/sources.list.d/github-cli.list
     apt-get update
     apt-get install -y gh
+
+  # ── GitHub Copilot CLI extension (best-effort — requires gh auth, installed properly in setup-me.sh step 3) ──
+  - su - devuser -c "gh extension install github/gh-copilot 2>/dev/null || true"
 
   # ── yq (YAML parser for provisioning engine) ──
   - |
@@ -677,7 +705,7 @@ runcmd:
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
 
-    cd ~/projects 2>/dev/null
+    cd ~/projects 2>/dev/null || true
     BASHRC
 
   # ── Git default config ──

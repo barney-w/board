@@ -80,7 +80,8 @@ async def _run_smoke_test(
             await ssh.connect(hostname, username="devuser", key_path=key_path or None)
             result = await ssh.run(cmd, check=False)
             ok = (result.exit_status == 0) if hasattr(result, "exit_status") else False
-            stdout = (result.stdout or "").strip() if hasattr(result, "stdout") else ""
+            raw = result.stdout if hasattr(result, "stdout") else b""
+            stdout = (raw.decode() if isinstance(raw, bytes) else (raw or "")).strip()
             return ok, stdout
 
     # ── Connectivity ──

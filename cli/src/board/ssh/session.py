@@ -85,7 +85,8 @@ class SSHSession:
         try:
             result = await self._conn.run(command, check=check)
         except asyncssh.ProcessError as exc:
-            msg = f"Command failed (exit {exc.exit_status}): {exc.stderr}"
+            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            msg = f"Command failed (exit {exc.exit_status}): {stderr}"
             raise SSHError(msg) from exc
         except asyncssh.Error as exc:
             msg = f"SSH command error: {exc}"

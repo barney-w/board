@@ -17,7 +17,7 @@ param regionShort string = 'aue'
 param developerName string
 
 @description('VM size SKU')
-param vmSku string = 'Standard_B4ms'
+param vmSku string = 'Standard_D2s_v6'
 
 @description('OS disk size in GB')
 param osDiskSizeGb int = 128

@@ -33,7 +33,7 @@ def wait_ready_command(
                 key_path=str(key_path),
                 user="devuser",
                 max_wait=timeout,
-                console=con,
+                console=con.console,
             )
         except SSHError as exc:
             con.error(str(exc))

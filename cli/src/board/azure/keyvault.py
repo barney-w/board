@@ -79,7 +79,7 @@ async def create_or_recover_vault(
             vault_name,
         )
         logger.info("Key Vault '%s' already exists", vault_name)
-        return vault.properties.vault_uri
+        return vault.properties.vault_uri  # type: ignore[return-value]
     except HttpResponseError:
         pass  # Vault doesn't exist in this RG, continue
 
@@ -93,12 +93,13 @@ async def create_or_recover_vault(
         if deleted:
             logger.info("Recovering soft-deleted Key Vault '%s'", vault_name)
             poller = await asyncio.to_thread(
-                client.vaults.begin_recover_deleted,
-                vault_name,
-                location,
+                lambda: client.vaults.begin_recover_deleted(  # type: ignore[attr-defined]
+                    vault_name,
+                    location,
+                ),
             )
             vault = await asyncio.to_thread(poller.result)
-            return vault.properties.vault_uri
+            return vault.properties.vault_uri  # type: ignore[return-value]
     except HttpResponseError:
         pass  # No soft-deleted vault, continue with fresh creation
 
@@ -128,7 +129,7 @@ async def create_or_recover_vault(
         )
         vault = await asyncio.to_thread(poller.result)
         logger.info("Key Vault '%s' created", vault_name)
-        return vault.properties.vault_uri
+        return vault.properties.vault_uri  # type: ignore[return-value]
     except HttpResponseError as exc:
         # 4. Creation conflict — vault may be in limbo (recently deleted,
         # not yet queryable as soft-deleted). Retry with purge.
@@ -170,7 +171,7 @@ async def create_or_recover_vault(
                     vault_name,
                     attempt,
                 )
-                return vault.properties.vault_uri
+                return vault.properties.vault_uri  # type: ignore[return-value]
         except HttpResponseError:
             logger.info(
                 "Retry %d/%d — waiting for soft-delete state to settle...",
@@ -278,7 +279,7 @@ async def ensure_secrets_officer_role(
         role_definition_id=role_definition_id,
         principal_id=principal_id,
         principal_type="User",
-    )
+    )  # type: ignore[call-arg]
     try:
         await asyncio.to_thread(
             auth_client.role_assignments.create,

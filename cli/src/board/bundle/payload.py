@@ -44,4 +44,5 @@ def build_payload(
         vm_name=vm_name,
         issued_at=issued_at,
         valid_until=valid_until,
+        browserIde=None,
     )

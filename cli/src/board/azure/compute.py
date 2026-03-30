@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from azure.mgmt.compute import ComputeManagementClient
+from azure.mgmt.compute.models import RunCommandInput
 from azure.mgmt.network import NetworkManagementClient
 
 from board.core.errors import BoardError
@@ -18,7 +19,7 @@ async def list_vms(
     credential: Any,
     subscription_id: str,
     resource_group: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List VMs in a resource group with their power state.
 
     Returns:
@@ -30,11 +31,12 @@ async def list_vms(
     )
     results = []
     for vm in vms_raw:
+        vm_name = vm.name or ""
         # Fetch instance view for power state
         instance_view = await asyncio.to_thread(
             client.virtual_machines.instance_view,
             resource_group,
-            vm.name,
+            vm_name,
         )
         power_state = "unknown"
         if instance_view.statuses:
@@ -44,7 +46,7 @@ async def list_vms(
                     break
         results.append(
             {
-                "name": vm.name,
+                "name": vm_name,
                 "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else None,
                 "os": (
                     vm.storage_profile.os_disk.os_type
@@ -63,7 +65,7 @@ async def get_vm_status(
     subscription_id: str,
     resource_group: str,
     vm_name: str,
-) -> dict:
+) -> dict[str, Any]:
     """Get detailed VM status including power state and provisioning state.
 
     Returns:
@@ -211,7 +213,7 @@ async def list_skus(
     subscription_id: str,
     location: str,
     filter_pattern: str = "",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """List available VM SKUs for a location using the REST API.
 
     Uses the Compute Resource SKUs API directly rather than ``az vm list-skus``
@@ -289,16 +291,17 @@ async def run_command(
         BoardError: If the command execution fails.
     """
     client = ComputeManagementClient(credential, subscription_id)
-    run_params = {
-        "command_id": "RunShellScript",
-        "script": [script],
-    }
+    run_params = RunCommandInput(
+        command_id="RunShellScript",
+        script=[script],
+    )
     try:
         poller = await asyncio.to_thread(
-            client.virtual_machines.begin_run_command,
-            resource_group,
-            vm_name,
-            run_params,
+            lambda: client.virtual_machines.begin_run_command(
+                resource_group,
+                vm_name,
+                run_params,
+            ),
         )
         result = await asyncio.to_thread(poller.result)
     except Exception as exc:

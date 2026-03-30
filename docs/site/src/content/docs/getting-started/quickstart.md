@@ -1,15 +1,15 @@
 ---
 title: Quickstart
-description: Get a cloud dev environment running in 5 minutes.
+description: Provision a cloud dev environment and hand it to a developer.
 ---
 
 ## Prerequisites
 
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) with an active subscription
 - [just](https://github.com/casey/just) command runner
-- [Node.js 20+](https://nodejs.org/) (for the VS Code extension)
+- [shellcheck](https://github.com/koalaman/shellcheck) and [yq](https://github.com/mikefarah/yq) (for `just check`)
 
-## Board up
+## Provision
 
 ```bash
 git clone https://github.com/barney-w/board.git
@@ -17,24 +17,16 @@ cd board
 just board
 ```
 
-The interactive wizard walks you through:
-
-1. **Azure login** — authenticates with your subscription
-2. **Environment name** — label for this cloud environment
-3. **Environment type** — personal or work-sandbox
-4. **Projects** — which project manifests to provision
-5. **Deploy** — creates the VM, installs tools, provisions projects
-
-When it finishes, you'll see a completion card with the environment details and next steps.
+The interactive wizard walks you through Azure login, naming the environment, selecting project manifests, and deploying. It creates the VM, runs cloud-init, provisions projects, and verifies health.
 
 ## Send a board pass
 
 ```bash
-just export-pass alice
+just export-pass jbloggs
 ```
 
-This creates an encrypted `.board-pass` file. Send it to the developer along with the passphrase (via a separate channel).
+This creates an encrypted starter kit zip containing a `.board-pass` file, the VS Code extension VSIX, a setup script, and a quick-start guide. Send it to the developer with the passphrase via a separate channel.
 
-## Connect
+## Developer connects
 
-The developer installs the [Board VS Code extension](https://marketplace.visualstudio.com/items?itemName=board), imports the board pass, and clicks **Connect**. That's it — they're coding.
+The developer unzips, double-clicks **Setup Board**, enters the passphrase, and clicks **Connect**. See [For Developers](/board/getting-started/for-developers/) for their full guide.

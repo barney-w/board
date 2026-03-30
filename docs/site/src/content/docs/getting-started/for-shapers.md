@@ -1,43 +1,37 @@
 ---
 title: For Shapers (Admins)
-description: Guide for team leads and DevOps engineers who provision and manage cloud dev environments.
+description: Provision and manage cloud dev environments for your team.
 ---
 
-A **shaper** is someone who provisions and manages cloud dev environments for their team. This is typically a tech lead, DevOps engineer, or senior developer.
+A **shaper** provisions and manages cloud dev environments. Typically a tech lead, DevOps engineer, or senior developer.
 
-## Board up a developer
+## Provision a board
 
 ```bash
 just board
 ```
 
-The wizard handles everything: Azure login, VM provisioning, cloud-init, project setup, and health verification.
+The wizard handles Azure login, VM creation, cloud-init, project provisioning, and health verification.
 
-## Managing boards
+## Manage boards
 
 ```bash
 just shape
 ```
 
-The admin menu shows your fleet status with colored dots (green = running, grey = stopped) and provides options to:
+The admin menu shows fleet status with coloured dots (green = running, grey = stopped) and provides options to start/stop boards, re-provision projects, create board passes, manage secrets, and run health checks.
 
-- Start/stop boards
-- Wax a board (re-provision projects)
-- Create board passes
-- Manage secrets
-- Run health checks
-
-## Creating board passes
+## Create a board pass
 
 ```bash
-just export-pass alice
+just export-pass jbloggs
 ```
 
-The board pass is an AES-256-GCM encrypted file containing SSH keys and connection details. Send it to the developer along with the passphrase (always via a separate channel — in person, phone call, or different messaging app).
+Creates an encrypted starter kit zip with SSH keys, connection details, the VS Code extension, and a setup script. Send it to the developer with the passphrase via a separate channel (in person, phone, different messaging app).
 
 ## Project manifests
 
-Each project has a `.project.yaml` manifest that declares everything needed:
+Each project has a `.project.yaml` manifest in `projects/`:
 
 ```yaml
 name: "my-api"
@@ -55,7 +49,7 @@ health:
     check: "curl -sf http://localhost:8000/health"
 ```
 
-See [Manifest Schema](/board/reference/manifest-schema/) for the full specification.
+See [Manifest Schema](/board/reference/manifest-schema/) for the full spec.
 
 ## Fleet operations
 
@@ -63,4 +57,4 @@ See [Manifest Schema](/board/reference/manifest-schema/) for the full specificat
 just fleet-status
 ```
 
-Shows all boards across your environment with their status, TTFC, and health scores.
+Shows all boards across your environment with status, uptime, and health.

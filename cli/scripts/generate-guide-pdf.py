@@ -9,12 +9,13 @@ Requires: pip install fpdf2
 
 import sys
 from pathlib import Path
+
 from fpdf import FPDF, XPos, YPos
 
 
 class BoardGuide(FPDF):
-    BLUE = (14, 165, 233)       # #0ea5e9
-    DARK_BLUE = (2, 132, 199)   # #0284c7
+    BLUE = (14, 165, 233)  # #0ea5e9
+    DARK_BLUE = (2, 132, 199)  # #0284c7
     DARK = (30, 30, 30)
     GREY = (100, 100, 100)
     LIGHT_BG = (248, 250, 252)  # #f8fafc
@@ -47,8 +48,10 @@ class BoardGuide(FPDF):
         self.rect(x + r, y, w - 2 * r, h, "F")
         self.rect(x, y + r, w, h - 2 * r, "F")
         for cx, cy in [
-            (x + r, y + r), (x + w - r, y + r),
-            (x + r, y + h - r), (x + w - r, y + h - r),
+            (x + r, y + r),
+            (x + w - r, y + r),
+            (x + r, y + h - r),
+            (x + w - r, y + h - r),
         ]:
             self.circle(cx, cy, r, "F")
 
@@ -62,6 +65,7 @@ class BoardGuide(FPDF):
         char_w = self.get_string_width("x")
         chars_per_line = int(body_w / char_w)
         import textwrap
+
         lines = textwrap.wrap(body, width=chars_per_line)
         body_h = len(lines) * 4.5
         card_h = body_h + 16
@@ -129,9 +133,9 @@ def build_pdf(output_path):
     pdf.set_font("Helvetica", "", 9.5)
     pdf.set_text_color(*BoardGuide.GREY)
     pdf.multi_cell(
-        170, 5,
-        "Your admin created a cloud dev environment for you. "
-        "Follow these steps to get connected.",
+        170,
+        5,
+        "Your admin created a cloud dev environment for you. Follow these steps to get connected.",
     )
     y = pdf.get_y() + 6
 
@@ -139,22 +143,24 @@ def build_pdf(output_path):
     y = pdf.draw_section_title("Get Connected", y)
 
     y = pdf.draw_step(
-        1, "Run Setup",
+        1,
+        "Run Setup",
         'Unzip this folder and double-click "Setup Board" '
         "(macOS/Linux: .command, Windows: .cmd). "
         "This installs the VS Code extension and opens your board pass.",
         y,
     )
     y = pdf.draw_step(
-        2, "Enter Your Passphrase",
+        2,
+        "Enter Your Passphrase",
         "VS Code will ask for the passphrase your admin shared with you. "
         "This decrypts your connection credentials.",
         y,
     )
     y = pdf.draw_step(
-        3, "Click Connect",
-        "The Board Pass card appears. Click Connect Now "
-        "and you're coding on your cloud VM.",
+        3,
+        "Click Connect",
+        "The Board Pass card appears. Click Connect Now and you're coding on your cloud VM.",
         y,
     )
     y += 2
@@ -165,7 +171,8 @@ def build_pdf(output_path):
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BoardGuide.GREY)
     pdf.multi_cell(
-        170, 4.5,
+        170,
+        4.5,
         "On first connect you'll be prompted to run first-time setup "
         "(Git identity + SSH keys). Your VM has a sample project at "
         "~/projects/hello-board -- try docker compose up and visit "
@@ -180,7 +187,7 @@ def build_pdf(output_path):
         ("Board: Connect", "Open a remote VS Code window on your VM"),
         ("Board: Start / Stop", "Start or deallocate the VM"),
         ("Board: Run First-Time Setup", "Configure Git + SSH keys on the VM"),
-        ("Board: Open in Browser", "Open code-server or VS Code Tunnel"),
+        ("Board: Open code-server", "Open code-server in your browser"),
     ]
     for i, (cmd, desc) in enumerate(commands):
         y = pdf.draw_command_row(cmd, desc, y, shade=(i % 2 == 0))
@@ -197,9 +204,7 @@ def build_pdf(output_path):
 
 
 if __name__ == "__main__":
-    default = str(
-        Path(__file__).resolve().parent / "templates" / "Board Quick Start.pdf"
-    )
+    default = str(Path(__file__).resolve().parent / "templates" / "Board Quick Start.pdf")
     out = sys.argv[1] if len(sys.argv) > 1 else default
     build_pdf(out)
     print(f"Generated: {out}")

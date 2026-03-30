@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any
 
 import typer
 
@@ -19,11 +20,11 @@ async def _collect_metrics(
     dev_name: str,
     hostname: str,
     key_path: str,
-) -> dict:
+) -> dict[str, Any]:
     """SSH into a running VM and collect metrics. Returns a dict of metrics."""
     from board.ssh.session import SSHSession
 
-    metrics: dict = {"dev_name": dev_name, "ttfc": None, "health": None, "issues": []}
+    metrics: dict[str, Any] = {"dev_name": dev_name, "ttfc": None, "health": None, "issues": []}
 
     try:
         async with SSHSession() as ssh:
@@ -35,7 +36,8 @@ async def _collect_metrics(
                 "cat ~/.board/last-check 2>/dev/null",
                 check=False,
             )
-            output = result.stdout or "" if result else ""
+            raw_output = result.stdout if result else ""
+            output = raw_output.decode() if isinstance(raw_output, bytes) else (raw_output or "")
 
             parts = output.split("---", 1)
             json_part = parts[0] if parts else ""
@@ -99,16 +101,16 @@ async def _run_fleet(env: str, region_short: str) -> None:
             if key_path.exists():
                 tasks.append(_collect_metrics(dev_name, fqdn, str(key_path)))
             else:
-                tasks.append(
-                    asyncio.coroutine(
-                        lambda dn=dev_name: {
-                            "dev_name": dn,
-                            "ttfc": None,
-                            "health": None,
-                            "issues": [],
-                        }
-                    )()
-                )
+
+                async def _empty_metrics(dn: str = dev_name) -> dict[str, Any]:
+                    return {
+                        "dev_name": dn,
+                        "ttfc": None,
+                        "health": None,
+                        "issues": [],
+                    }
+
+                tasks.append(_empty_metrics())
 
     metrics_results = {}
     if tasks:

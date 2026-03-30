@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from azure.identity import DefaultAzureCredential
 
@@ -51,7 +52,7 @@ async def get_tenant_id() -> str:
     return await az_text("account", "show", "--query", "tenantId", "-o", "tsv", timeout=30)
 
 
-async def list_subscriptions() -> list[dict]:
+async def list_subscriptions() -> list[dict[str, Any]]:
     """List available Azure subscriptions.
 
     Returns a list of dicts with keys: name, id, is_default.

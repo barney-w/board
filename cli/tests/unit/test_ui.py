@@ -79,14 +79,14 @@ class TestConsoleOutput:
 
     def test_header(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             header("Test Header")
         output = buf.getvalue()
         assert "Test Header" in output
 
     def test_banner(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             banner("Board", "Developer VM Provisioning")
         output = buf.getvalue()
         assert "Board" in output
@@ -94,7 +94,7 @@ class TestConsoleOutput:
 
     def test_ascii_banner(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             ascii_banner("Developer VM Provisioning")
         output = buf.getvalue()
         assert "██████╗" in output
@@ -102,7 +102,7 @@ class TestConsoleOutput:
 
     def test_step(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             step(1, 5, "Configure")
         output = buf.getvalue()
         assert "1/5" in output
@@ -110,7 +110,7 @@ class TestConsoleOutput:
 
     def test_success(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             success("All good")
         output = buf.getvalue()
         assert "✓" in output
@@ -118,8 +118,7 @@ class TestConsoleOutput:
 
     def test_error(self) -> None:
         c, buf = self._make_console()
-        # error() writes to _stderr_console, so patch that
-        with patch("board.ui.console._stderr_console", c):
+        with patch("board.ui.console.console._err", c):
             error("Something failed")
         output = buf.getvalue()
         assert "✗" in output
@@ -127,7 +126,7 @@ class TestConsoleOutput:
 
     def test_warn(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             warn("Watch out")
         output = buf.getvalue()
         assert "!" in output
@@ -135,14 +134,14 @@ class TestConsoleOutput:
 
     def test_info(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             info("Some detail")
         output = buf.getvalue()
         assert "Some detail" in output
 
     def test_divider(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             divider()
         output = buf.getvalue()
         # Rich rule uses ─ characters
@@ -150,7 +149,7 @@ class TestConsoleOutput:
 
     def test_summary_box(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             summary_box("Summary", ["Region: australiaeast", "VM: Standard_D4s_v5"])
         output = buf.getvalue()
         assert "Summary" in output
@@ -158,7 +157,7 @@ class TestConsoleOutput:
 
     def test_completion_box(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             completion_box("Done", ["VM deployed", "SSH configured"])
         output = buf.getvalue()
         assert "Done" in output
@@ -166,7 +165,7 @@ class TestConsoleOutput:
 
     def test_warn_summary_with_warnings(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             warn_summary("Warnings", ["Disk nearly full", "Old SSH key"])
         output = buf.getvalue()
         assert "Warnings (2)" in output
@@ -175,7 +174,7 @@ class TestConsoleOutput:
 
     def test_warn_summary_empty(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             warn_summary("Warnings", [])
         output = buf.getvalue()
         # Empty warnings should produce no output
@@ -183,7 +182,7 @@ class TestConsoleOutput:
 
     def test_phase_timing(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             phase_timing("Infrastructure deployed", 222)
         output = buf.getvalue()
         assert "Infrastructure deployed" in output
@@ -191,7 +190,7 @@ class TestConsoleOutput:
 
     def test_phase_timing_seconds_only(self) -> None:
         c, buf = self._make_console()
-        with patch("board.ui.console.console", c):
+        with patch("board.ui.console.console._out", c):
             phase_timing("Quick step", 7)
         output = buf.getvalue()
         assert "Quick step" in output
@@ -208,14 +207,14 @@ class TestNonInteractivePrompts:
     def _set_non_interactive(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("BOARD_NON_INTERACTIVE", "1")
 
-    def test_input_text_returns_default(self) -> None:
-        assert input_text("Name", default="jbloggs") == "jbloggs"
+    async def test_input_text_returns_default(self) -> None:
+        assert await input_text("Name", default="jbloggs") == "jbloggs"
 
-    def test_input_text_empty_default(self) -> None:
-        assert input_text("Name") == ""
+    async def test_input_text_empty_default(self) -> None:
+        assert await input_text("Name") == ""
 
-    def test_input_validated_returns_default(self) -> None:
-        result = input_validated(
+    async def test_input_validated_returns_default(self) -> None:
+        result = await input_validated(
             "Developer name",
             default="jbloggs",
             pattern=r"^[a-z][a-z0-9]{0,11}$",
@@ -223,48 +222,50 @@ class TestNonInteractivePrompts:
         )
         assert result == "jbloggs"
 
-    def test_choose_returns_default(self) -> None:
+    async def test_choose_returns_default(self) -> None:
         assert (
-            choose("Region", ["australiaeast", "eastus"], default="australiaeast")
+            await choose("Region", ["australiaeast", "eastus"], default="australiaeast")
             == "australiaeast"
         )
 
-    def test_choose_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_choose_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("BOARD_REGION", "eastus")
         assert (
-            choose("Select region", ["australiaeast", "eastus"], default="australiaeast")
+            await choose("Select region", ["australiaeast", "eastus"], default="australiaeast")
             == "eastus"
         )
 
-    def test_choose_env_override_invalid_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_choose_env_override_invalid_ignored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("BOARD_REGION", "nosuchregion")
-        result = choose("Select region", ["australiaeast", "eastus"], default="australiaeast")
+        result = await choose("Select region", ["australiaeast", "eastus"], default="australiaeast")
         assert result == "australiaeast"
 
-    def test_choose_falls_back_to_first(self) -> None:
-        assert choose("Region", ["australiaeast", "eastus"]) == "australiaeast"
+    async def test_choose_falls_back_to_first(self) -> None:
+        assert await choose("Region", ["australiaeast", "eastus"]) == "australiaeast"
 
-    def test_checklist_returns_defaults(self) -> None:
-        result = checklist("Projects", ["surf", "surf-kit", "myterm"], defaults=["surf"])
+    async def test_checklist_returns_defaults(self) -> None:
+        result = await checklist("Projects", ["surf", "surf-kit", "myterm"], defaults=["surf"])
         assert result == ["surf"]
 
-    def test_checklist_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_checklist_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("BOARD_PROJECTS", "surf myterm")
-        result = checklist("Projects", ["surf", "surf-kit", "myterm"], defaults=["surf"])
+        result = await checklist("Projects", ["surf", "surf-kit", "myterm"], defaults=["surf"])
         assert result == ["surf", "myterm"]
 
-    def test_checklist_empty_defaults(self) -> None:
-        result = checklist("Projects", ["surf", "surf-kit"])
+    async def test_checklist_empty_defaults(self) -> None:
+        result = await checklist("Projects", ["surf", "surf-kit"])
         assert result == []
 
-    def test_confirm_returns_true(self) -> None:
-        assert confirm("Continue?") is True
+    async def test_confirm_returns_true(self) -> None:
+        assert await confirm("Continue?") is True
 
-    def test_confirm_ignores_default(self) -> None:
-        assert confirm("Continue?", default=False) is True
+    async def test_confirm_ignores_default(self) -> None:
+        assert await confirm("Continue?", default=False) is True
 
-    def test_secret_returns_empty(self) -> None:
-        assert secret("Token") == ""
+    async def test_secret_returns_empty(self) -> None:
+        assert await secret("Token") == ""
 
 
 # ── Boarding pass tests ──

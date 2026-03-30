@@ -54,7 +54,7 @@ def install_projects_command(
                 success_count, fail_count = await provision_projects(
                     ssh=ssh,
                     manifest_dir=manifest_dir,
-                    console=con,
+                    console=con.console,
                     keyvault_name=keyvault,
                 )
             if fail_count > 0:
@@ -98,7 +98,12 @@ def project_status_command(
 
                 result = await ssh.run("bash ~/projects/.board/check.sh", check=False)
                 if result.stdout:
-                    for line in result.stdout.strip().split("\n"):
+                    stdout = (
+                        result.stdout.decode()
+                        if isinstance(result.stdout, bytes)
+                        else result.stdout
+                    )
+                    for line in stdout.strip().split("\n"):
                         con.console.print(f"  {line}")
 
                 if result.exit_status != 0:

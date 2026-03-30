@@ -172,7 +172,7 @@ async def _provision_projects_menu() -> None:
             success_count, fail_count = await provision_projects(
                 ssh=ssh,
                 manifest_dir=manifest_dir,
-                console=con,
+                console=con.console,
                 keyvault_name=kv_name,
                 filter_names=selected,
             )

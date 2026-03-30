@@ -1,0 +1,47 @@
+# projects/surf-kit.project.yaml
+
+name: surf-kit
+description: Component library (React/pnpm)
+repo: https://github.com/barney-w/surf-kit
+path: ~/projects/surf-kit
+
+requires:
+  tools: [node, pnpm]
+  cloud_init: true
+
+install:
+  - label: Install dependencies
+    run: pnpm install
+  - label: Build library
+    run: pnpm run build
+
+vscode:
+  ports:
+    "5173": { label: "surf-kit dev server", auto_forward: notify }
+
+  tasks:
+    - label: Build
+      command: pnpm run build
+      group: build
+    - label: Dev Server
+      command: pnpm run dev
+      background: true
+    - label: Lint
+      command: pnpm run lint
+    - label: Type Check
+      command: pnpm run typecheck
+
+  settings:
+    typescript.tsdk: ./node_modules/typescript/lib
+
+# ── Workspace panes (used by myterm to generate surf layout) ──
+workspace:
+  services:
+    - name: surf-kit Dev
+      command: pnpm run dev
+
+health:
+  - label: Dependencies
+    check: test -d node_modules
+  - label: Build
+    check: test -d dist

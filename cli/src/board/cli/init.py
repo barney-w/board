@@ -113,7 +113,7 @@ def _detect_framework(project_dir: Path, language: str) -> str:
 
 def _detect_docker_services(project_dir: Path) -> list[str]:
     """Detect Docker Compose services."""
-    services = []
+    services: list[str] = []
     compose_file = None
     for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
         if (project_dir / name).exists():

@@ -6,6 +6,7 @@ import io
 import zipfile
 from pathlib import Path  # noqa: TC003 — used at runtime in function signatures
 
+
 def _patch_vsix(vsix_path: Path, png_content: bytes) -> bytes:
     """Return a patched VSIX (bytes) with the board-pass PNG replaced.
 
@@ -13,9 +14,10 @@ def _patch_vsix(vsix_path: Path, png_content: bytes) -> bytes:
     personalised card image.
     """
     buf = io.BytesIO()
-    with zipfile.ZipFile(vsix_path, "r") as src, zipfile.ZipFile(
-        buf, "w", zipfile.ZIP_DEFLATED
-    ) as dst:
+    with (
+        zipfile.ZipFile(vsix_path, "r") as src,
+        zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
         for item in src.infolist():
             data = src.read(item.filename)
             if item.filename == "extension/resources/board-pass-card.png":

@@ -6,6 +6,7 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -25,7 +26,7 @@ def _resolve_rg(env: str | None = None) -> str:
     return cfg.resource_group(env or _resolve_env(), DEFAULT_REGION)
 
 
-async def _get_azure_context() -> tuple:
+async def _get_azure_context() -> tuple[Any, str]:
     """Get credential and subscription ID."""
     from board.azure.auth import get_credential, get_subscription_id
 

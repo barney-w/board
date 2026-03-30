@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
@@ -12,6 +13,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI escape codes from *text*."""
+    return _ANSI_RE.sub("", text)
 
 
 class TestCommandRegistration:
@@ -33,12 +41,13 @@ class TestCommandRegistration:
     def test_up_help(self) -> None:
         result = runner.invoke(app, ["up", "--help"])
         assert result.exit_code == 0
-        assert "--dry-run" in result.output
-        assert "--demo" in result.output
-        assert "--non-interactive" in result.output
-        assert "--env" in result.output
-        assert "--location" in result.output
-        assert "--region-short" in result.output
+        output = _plain(result.output)
+        assert "--dry-run" in output
+        assert "--demo" in output
+        assert "--non-interactive" in output
+        assert "--env" in output
+        assert "--location" in output
+        assert "--region-short" in output
 
     def test_shape_help(self) -> None:
         result = runner.invoke(app, ["shape", "--help"])
@@ -48,8 +57,9 @@ class TestCommandRegistration:
     def test_fleet_help(self) -> None:
         result = runner.invoke(app, ["fleet", "--help"])
         assert result.exit_code == 0
-        assert "--env" in result.output
-        assert "--region-short" in result.output
+        output = _plain(result.output)
+        assert "--env" in output
+        assert "--region-short" in output
 
     def test_init_help(self) -> None:
         result = runner.invoke(app, ["init", "--help"])
@@ -59,14 +69,16 @@ class TestCommandRegistration:
     def test_smoke_test_help(self) -> None:
         result = runner.invoke(app, ["smoke-test", "--help"])
         assert result.exit_code == 0
-        assert "--hostname" in result.output
-        assert "--key" in result.output
+        output = _plain(result.output)
+        assert "--hostname" in output
+        assert "--key" in output
 
     def test_export_pass_help(self) -> None:
         result = runner.invoke(app, ["export-pass", "--help"])
         assert result.exit_code == 0
-        assert "--env" in result.output
-        assert "--region" in result.output
+        output = _plain(result.output)
+        assert "--env" in output
+        assert "--region" in output
 
     def test_vm_help_lists_subcommands(self) -> None:
         result = runner.invoke(app, ["vm", "--help"])

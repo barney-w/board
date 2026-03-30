@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 from board.core.errors import BoardError
 
 
-async def az_json(*args: str, timeout: int = 30) -> dict | list:
+async def az_json(*args: str, timeout: int = 30) -> dict[str, Any] | list[Any]:
     """Run an ``az`` CLI command and return parsed JSON output.
 
     Raises:
@@ -16,7 +17,7 @@ async def az_json(*args: str, timeout: int = 30) -> dict | list:
     """
     raw = await az_text(*args, timeout=timeout)
     try:
-        return json.loads(raw)
+        return json.loads(raw)  # type: ignore[no-any-return]
     except json.JSONDecodeError as exc:
         msg = f"az {args[0]} returned invalid JSON: {exc}"
         raise BoardError(msg) from exc

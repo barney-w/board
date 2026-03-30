@@ -298,7 +298,7 @@ class TestEnsureResourceGroup:
         mock_client.resource_groups.create_or_update.assert_called_once()
         call_args = mock_client.resource_groups.create_or_update.call_args
         assert call_args[0][0] == "rg-new"
-        assert call_args[0][1]["location"] == "australiaeast"
+        assert call_args[0][1].location == "australiaeast"
 
     @pytest.mark.asyncio
     async def test_rg_deleting_raises(self) -> None:

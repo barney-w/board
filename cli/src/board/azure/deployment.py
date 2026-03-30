@@ -14,6 +14,7 @@ from azure.mgmt.resource.deployments.models import (
     DeploymentMode,
     DeploymentProperties,
 )
+from azure.mgmt.resource.resources.models import ResourceGroup
 
 from board.azure.az import az_text
 from board.core.errors import DeploymentError
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-async def bicep_build(bicep_path: Path) -> dict:
+async def bicep_build(bicep_path: Path) -> dict[str, Any]:
     """Compile a Bicep file to ARM JSON via ``az bicep build --stdout``.
 
     Args:
@@ -41,7 +42,7 @@ async def bicep_build(bicep_path: Path) -> dict:
         msg = f"Bicep compilation failed for {bicep_path}: {exc}"
         raise DeploymentError(msg) from exc
     try:
-        return json.loads(raw)
+        return json.loads(raw)  # type: ignore[no-any-return]
     except json.JSONDecodeError as exc:
         msg = f"Bicep output is not valid JSON: {exc}"
         raise DeploymentError(msg) from exc
@@ -51,12 +52,12 @@ async def deploy(
     credential: Any,
     subscription_id: str,
     resource_group: str,
-    template: dict,
-    parameters: dict | None = None,
+    template: dict[str, Any],
+    parameters: dict[str, Any] | None = None,
     deployment_name: str = "",
     on_progress: Callable[[str, str], None] | None = None,
     timeout: int = 1200,
-) -> dict:
+) -> dict[str, Any]:
     """Deploy an ARM template using the Azure SDK.
 
     Args:
@@ -80,7 +81,7 @@ async def deploy(
         deployment_name = f"board-{int(time.time())}"
 
     # Wrap raw parameter values in ARM format if needed
-    arm_params: dict | None = None
+    arm_params: dict[str, Any] | None = None
     if parameters:
         arm_params = {}
         for k, v in parameters.items():
@@ -146,7 +147,7 @@ async def deploy(
             raise DeploymentError(msg) from exc
 
     # Extract outputs
-    outputs: dict = {}
+    outputs: dict[str, Any] = {}
     if result and result.properties and result.properties.outputs:
         for key, val in result.properties.outputs.items():
             outputs[key] = val.get("value", val) if isinstance(val, dict) else val
@@ -195,19 +196,17 @@ async def ensure_resource_group(
             raise DeploymentError(msg)
         return
 
-    rg_params = {
-        "location": location,
-        "tags": tags
+    rg_params = ResourceGroup(
+        location=location,
+        tags=tags
         or {
             "project": "devvm",
             "managed-by": "board-cli",
         },
-    }
+    )
     try:
         await asyncio.to_thread(
-            client.resource_groups.create_or_update,
-            name,
-            rg_params,
+            lambda: client.resource_groups.create_or_update(name, rg_params),
         )
     except Exception as exc:
         msg = f"Failed to create resource group '{name}': {exc}"

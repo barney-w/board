@@ -1,49 +1,36 @@
 ---
 title: For Developers
-description: Guide for developers using a cloud dev environment.
+description: Connect to your cloud dev environment and start coding.
 ---
 
-Your cloud dev environment is managed by your team — you just need to connect.
+Your admin gives you a zip file and a passphrase. Everything else is automatic.
 
-## Getting started
+## Connect
 
-1. Install the **Board** VS Code extension
-2. You'll receive a `.board-pass` file and a passphrase from your team lead
-3. Open VS Code — the welcome page appears automatically
-4. Click **Import Pass** and select your `.board-pass` file
-5. Enter the passphrase when prompted
-6. Click **Connect** — you're in
+1. Unzip the folder and double-click **Setup Board** (`.command` on Mac, `.cmd` on Windows)
+2. VS Code opens and asks for your passphrase — enter it
+3. Your Board Pass card appears — click **Connect Now**
 
-## What's in your environment
+You're coding on a cloud VM. VS Code's file explorer, terminal, and extensions all run remotely.
 
-Your cloud environment comes with everything pre-configured:
+## First-time setup
 
-- **Your projects** cloned and ready at `~/projects/`
-- **Docker services** running (databases, caches, etc.)
-- **Application services** managed by systemd
-- **VS Code workspace** with tasks, launch configs, and settings
-- **Health checks** to verify everything works
+On first connect, you'll be prompted to run a short setup: your name for Git, an SSH key, and optionally GitHub authentication (for Copilot). After that, your projects are at `~/projects/` with everything already running.
 
 ## Daily workflow
 
-**Start your board** (if stopped):
-- Click the Board status bar item in VS Code, or
-- Your admin can start it with `just start yourname`
+**Start your board** (if stopped): click the Board status bar item in VS Code, or ask your admin.
 
 **Check health:**
 ```bash
 check
 ```
 
-This runs all health checks and shows which services are healthy.
-
-**Get help:**
+**See available commands:**
 ```bash
 board-help
 ```
 
-Shows available commands and how to manage services.
+## Auto-shutdown
 
-## Your board auto-stops
-
-Boards auto-shutdown at 7 PM to save costs. Your work is saved — just start it again tomorrow. All your files, Docker volumes, and git state persist.
+Boards stop at 7 PM daily to save costs. Your files, Docker volumes, and git state all persist — just reconnect tomorrow.
