@@ -36,14 +36,18 @@ if not defined PASS (
     exit /b 1
 )
 
-REM Install extension
-echo   Installing Board extension...
-code --install-extension "%VSIX%" --force
-echo   Done.
+REM Install extension (skip if already installed to avoid unnecessary reload)
+code --list-extensions 2>nul | findstr /i "barney-w.board" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   Board extension already installed.
+) else (
+    echo   Installing Board extension...
+    code --install-extension "%VSIX%"
+    echo   Done.
+    REM Give VS Code time to load the new extension before opening the file
+    timeout /t 3 /nobreak >nul
+)
 echo.
-
-REM Give VS Code time to load the new extension before opening the file
-timeout /t 2 /nobreak >nul
 
 REM Open the board pass in VS Code (triggers the import flow)
 echo   Opening your board pass in VS Code...
