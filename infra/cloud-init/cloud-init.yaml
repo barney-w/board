@@ -287,7 +287,7 @@ write_files:
       echo "  ${dim}board-help${reset}    show all commands"
       # Browser IDE hints (only show if services are available)
       if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
-          echo "  ${dim}code-server${reset}   ssh -L 8080:localhost:8080 $USER@$(hostname) then http://localhost:8080"
+          echo "  ${dim}code-server${reset}   ssh -L 8080:localhost:8080 $(hostname) then http://localhost:8080"
       fi
       if [[ -f /home/devuser/.board/tunnel-url ]]; then
           echo "  ${dim}tunnel${reset}        $(cat /home/devuser/.board/tunnel-url)"
