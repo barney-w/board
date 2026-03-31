@@ -346,7 +346,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // ---- board.importPass ----
   context.subscriptions.push(
     vscode.commands.registerCommand('board.importPass', async (uri?: vscode.Uri) => {
-      await importBundle(context, uri);
+      try {
+        await importBundle(context, uri);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`Board pass import failed: ${msg}`);
+        outputChannel.appendLine(`Import error: ${msg}`);
+      }
     }),
   );
 
@@ -402,6 +408,33 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         vscode.commands.executeCommand('board.importPass', uri);
       }
+    }),
+  );
+
+  // ---- board.showPass ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.showPass', () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage(
+          'Board is not configured. Run "Board: Import Pass" or "Board: Configure Connection" first.',
+        );
+        return;
+      }
+      const cfg = getConfig();
+      const payload: BundlePayload = {
+        developerName: cfg.developerName,
+        environment: cfg.environment,
+        region: cfg.region,
+        regionShort: cfg.regionShort,
+        hostname: getHostname(cfg),
+        username: 'devuser',
+        authMethod: cfg.authMethod,
+        sshPrivateKey: '',
+        sshPublicKey: '',
+        resourceGroup: getResourceGroup(cfg),
+        vmName: getVmName(cfg),
+      };
+      showBoardPassCard(context, payload);
     }),
   );
 

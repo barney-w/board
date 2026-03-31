@@ -158,20 +158,7 @@ export async function connect(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  // 6. Ensure Remote-SSH will install this extension on the remote host
-  const remoteSshConfig = vscode.workspace.getConfiguration('remote.SSH');
-  const defaultExts: string[] =
-    remoteSshConfig.get<string[]>('defaultExtensions') ?? [];
-  const extensionId = 'barney-w.board';
-  if (!defaultExts.includes(extensionId)) {
-    await remoteSshConfig.update(
-      'defaultExtensions',
-      [...defaultExts, extensionId],
-      vscode.ConfigurationTarget.Global,
-    );
-  }
-
-  // 7. Open the remote folder via Remote-SSH (replaces current window)
+  // 6. Open the remote folder via Remote-SSH (replaces current window)
   const hostAlias = getSshHostAlias(config);
   await vscode.commands.executeCommand(
     'vscode.openFolder',

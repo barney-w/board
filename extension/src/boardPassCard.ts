@@ -310,7 +310,7 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
       z-index: 2;
     }
 
-    /* Authorized / Revoked stamp overlay */
+    /* Authorised / Revoked stamp overlay */
     .stamp {
       position: absolute;
       top: 0px;
@@ -562,7 +562,7 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
 
       <!-- Body -->
       <div class="pass-body">
-        <div class="stamp ${expired ? 'expired' : ''}">${expired ? 'Revoked' : 'Authorized'}</div>
+        <div class="stamp ${expired ? 'expired' : ''}">${expired ? 'Revoked' : 'Authorised'}</div>
 
         <div class="field-row">
           <div class="field" style="flex:2">
