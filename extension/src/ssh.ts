@@ -193,7 +193,7 @@ export async function writeSshKey(
       resolved,
       '/inheritance:r',
       '/grant:r',
-      `${username}:(R)`,
+      `${username}:(F)`,
     ]);
   }
 }
