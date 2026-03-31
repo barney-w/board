@@ -36,17 +36,20 @@ if [[ -z "$PASS" ]]; then
     exit 1
 fi
 
-# Install extension
-echo "  Installing Board extension..."
-if ! code --install-extension "$VSIX" --force; then
-    echo "  WARNING: Extension install may have failed."
-    echo "  Try opening VS Code and installing $VSIX manually."
+# Install extension (skip if already installed to avoid unnecessary reload)
+if code --list-extensions 2>/dev/null | grep -qi "barney-w.board"; then
+    echo "  Board extension already installed."
+else
+    echo "  Installing Board extension..."
+    if ! code --install-extension "$VSIX"; then
+        echo "  WARNING: Extension install may have failed."
+        echo "  Try opening VS Code and installing $VSIX manually."
+    fi
+    echo "  Done."
+    # Give VS Code time to load the new extension before opening the file
+    sleep 3
 fi
-echo "  Done."
 echo ""
-
-# Give VS Code time to load the new extension before opening the file
-sleep 2
 
 # Open the board pass in VS Code (triggers the import flow)
 echo "  Opening your board pass in VS Code..."
