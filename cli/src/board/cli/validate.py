@@ -34,7 +34,7 @@ SSHD_SETTINGS = [
     "PermitRootLogin no",
     "PasswordAuthentication no",
     "X11Forwarding no",
-    "MaxAuthTries 3",
+    "MaxAuthTries 6",
 ]
 
 CLOUD_INIT_ARTIFACTS = [
