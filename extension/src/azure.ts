@@ -38,7 +38,8 @@ interface AzResult {
  */
 async function runAzCommand(args: string[]): Promise<AzResult> {
   return new Promise((resolve) => {
-    execFile('az', args, { timeout: AZ_TIMEOUT_MS }, (error, stdout, stderr) => {
+    const env = { ...process.env, PATH: `${process.env.PATH || ''}:/opt/homebrew/bin:/usr/local/bin` };
+    execFile('az', args, { timeout: AZ_TIMEOUT_MS, env }, (error, stdout, stderr) => {
       if (error) {
         // `error.code` may be the exit code (number) or a Node error string
         const rawCode = (error as NodeJS.ErrnoException).code;

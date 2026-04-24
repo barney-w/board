@@ -17,21 +17,13 @@ export function showBoardPassCard(
     { enableScripts: true },
   );
 
-  panel.webview.html = getBoardPassHtml(payload, !!bundleUri);
+  panel.webview.html = getBoardPassHtml(payload);
 
   panel.webview.onDidReceiveMessage(
     async (message) => {
-      switch (message.command) {
-        case 'connect':
-          panel.dispose();
-          await vscode.commands.executeCommand('board.connect');
-          break;
-        case 'deleteFile':
-          if (bundleUri) {
-            await vscode.workspace.fs.delete(bundleUri);
-            panel.webview.postMessage({ command: 'fileDeleted' });
-          }
-          break;
+      if (message.command === 'connect') {
+        panel.dispose();
+        await vscode.commands.executeCommand('board.connect');
       }
     },
     undefined,
@@ -88,7 +80,7 @@ function generateAvatar(name: string): string {
   </svg>`;
 }
 
-export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = true): string {
+export function getBoardPassHtml(payload: BundlePayload): string {
   const expired = isExpired(payload.validUntil);
   const remaining = daysRemaining(payload.validUntil);
   const barcode = generateBarcode(payload.developerName + payload.hostname);
@@ -513,23 +505,6 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
       transform: translateY(-1px);
     }
 
-    .btn-delete {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-    }
-
-    .btn-delete:hover {
-      border-color: var(--danger);
-      color: var(--danger);
-    }
-
-    .btn-delete.deleted {
-      border-color: var(--success);
-      color: var(--success);
-      pointer-events: none;
-    }
-
     /* ---- Responsive ---- */
     @media (max-width: 460px) {
       .field-row { flex-direction: column; gap: 12px; }
@@ -596,6 +571,8 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
             <div class="clearance">
               <span class="clearance-chip"><span class="clearance-dot"></span>SSH Terminal</span>
               ${hasBrowserIde && payload.browserIde?.codeServer ? '<span class="clearance-chip"><span class="clearance-dot"></span>code-server</span>' : ''}
+              <span class="clearance-chip"><span class="clearance-dot"></span>Cockpit</span>
+              <span class="clearance-chip"><span class="clearance-dot"></span>Portainer</span>
             </div>
           </div>
         </div>
@@ -625,10 +602,30 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
       </div>
     </div>
 
+    ${payload.authMethod === 'entra-id' ? `
+    <!-- Entra ID prerequisite notice -->
+    <div style="
+      margin-top: 20px;
+      padding: 14px 20px;
+      border-radius: 10px;
+      border: 1px solid color-mix(in srgb, var(--sky) 25%, transparent);
+      background: var(--sky-glow);
+      font-size: 0.82em;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    ">
+      <div style="font-weight:600;color:var(--sky-light);margin-bottom:4px;">Entra ID Authentication</div>
+      Before connecting, ensure you have:
+      <ul style="margin:6px 0 0 16px;padding:0;">
+        <li><a href="https://aka.ms/installazurecli" style="color:var(--sky-light)">Azure CLI</a> installed</li>
+        <li>Signed in with <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:0.9em;">az login</code></li>
+      </ul>
+    </div>
+    ` : ''}
+
     <!-- Actions below card -->
     <div class="actions">
       <button class="btn btn-connect" id="connectBtn">Connect Now</button>
-      ${showDelete ? '<button class="btn btn-delete" id="deleteBtn">Delete Pass File</button>' : ''}
     </div>
   </div>
 
@@ -639,19 +636,6 @@ export function getBoardPassHtml(payload: BundlePayload, showDelete: boolean = t
       vscode.postMessage({ command: 'connect' });
     });
 
-    const deleteBtn = document.getElementById('deleteBtn');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', () => {
-        vscode.postMessage({ command: 'deleteFile' });
-      });
-    }
-
-    window.addEventListener('message', (event) => {
-      if (event.data.command === 'fileDeleted' && deleteBtn) {
-        deleteBtn.textContent = 'Deleted';
-        deleteBtn.classList.add('deleted');
-      }
-    });
   </script>
 </body>
 </html>`;

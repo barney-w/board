@@ -389,25 +389,9 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }, 200);
 
-      if (isConfigured()) {
-        const cfg = getConfig();
-        const payload: BundlePayload = {
-          developerName: cfg.developerName,
-          environment: cfg.environment,
-          region: cfg.region,
-          regionShort: cfg.regionShort,
-          hostname: getHostname(cfg),
-          username: 'devuser',
-          authMethod: cfg.authMethod,
-          sshPrivateKey: '',
-          sshPublicKey: '',
-          resourceGroup: getResourceGroup(cfg),
-          vmName: getVmName(cfg),
-        };
-        showBoardPassCard(context, payload);
-      } else {
-        vscode.commands.executeCommand('board.importPass', uri);
-      }
+      // Always import the opened file — it may be for a different developer
+      // or a refreshed pass replacing stale config.
+      vscode.commands.executeCommand('board.importPass', uri);
     }),
   );
 
@@ -489,6 +473,54 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // ---- board.openCockpit ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openCockpit', async () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage('Configure Board first.');
+        return;
+      }
+      const config = getConfig();
+      const hostAlias = getSshHostAlias(config);
+
+      const terminal = vscode.window.createTerminal({
+        name: 'Cockpit tunnel',
+        shellPath: 'ssh',
+        shellArgs: ['-L', '9091:localhost:9190', '-N', hostAlias],
+        iconPath: new vscode.ThemeIcon('dashboard'),
+      });
+      terminal.show();
+
+      setTimeout(() => {
+        vscode.env.openExternal(vscode.Uri.parse('http://localhost:9091'));
+      }, 2000);
+    }),
+  );
+
+  // ---- board.openPortainer ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('board.openPortainer', async () => {
+      if (!isConfigured()) {
+        vscode.window.showWarningMessage('Configure Board first.');
+        return;
+      }
+      const config = getConfig();
+      const hostAlias = getSshHostAlias(config);
+
+      const terminal = vscode.window.createTerminal({
+        name: 'Portainer tunnel',
+        shellPath: 'ssh',
+        shellArgs: ['-L', '9444:localhost:9443', '-N', hostAlias],
+        iconPath: new vscode.ThemeIcon('package'),
+      });
+      terminal.show();
+
+      setTimeout(() => {
+        vscode.env.openExternal(vscode.Uri.parse('https://localhost:9444'));
+      }, 2000);
+    }),
+  );
+
   // ---- Terminal profile provider ----
   const terminalProvider = new BoardTerminalProfileProvider();
   context.subscriptions.push(
@@ -522,6 +554,17 @@ export function activate(context: vscode.ExtensionContext): void {
       vmName: getVmName(cfg),
     };
     showBoardPassCard(context, remotePayload);
+
+    // Open QUICKSTART.md in markdown preview alongside the board pass
+    const quickstartUri = vscode.Uri.file('/home/devuser/projects/QUICKSTART.md');
+    vscode.workspace.fs.stat(quickstartUri).then(
+      () => {
+        vscode.commands.executeCommand('markdown.showPreview', quickstartUri);
+      },
+      () => {
+        outputChannel.appendLine('QUICKSTART.md not found, skipping preview');
+      },
+    );
 
     if (config.autoOpenTerminals) {
       outputChannel.appendLine(
