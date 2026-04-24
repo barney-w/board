@@ -159,6 +159,14 @@ def build_pdf(output_path):
     )
     y = pdf.draw_step(
         3,
+        "Sign In (Entra ID boards only)",
+        "If your board uses Entra ID authentication, install the Azure CLI "
+        "(https://aka.ms/installazurecli) and run 'az login' in your terminal "
+        "before connecting. SSH key boards can skip this step.",
+        y,
+    )
+    y = pdf.draw_step(
+        4,
         "Click Connect",
         "The Board Pass card appears. Click Connect Now and you're coding on your cloud VM.",
         y,
@@ -174,9 +182,8 @@ def build_pdf(output_path):
         170,
         4.5,
         "On first connect you'll be prompted to run first-time setup "
-        "(Git identity + SSH keys). Your VM has a sample project at "
-        "~/projects/hello-board -- try docker compose up and visit "
-        "http://localhost:8000.",
+        "(Git identity + GitHub auth). Your projects are at ~/projects/. "
+        "Run 'check' in the terminal to verify everything is healthy.",
     )
     y = pdf.get_y() + 6
 
@@ -186,8 +193,9 @@ def build_pdf(output_path):
         ("Board: Import Pass", "Decrypt and install a .board-pass file"),
         ("Board: Connect", "Open a remote VS Code window on your VM"),
         ("Board: Start / Stop", "Start or deallocate the VM"),
-        ("Board: Run First-Time Setup", "Configure Git + SSH keys on the VM"),
-        ("Board: Open code-server", "Open code-server in your browser"),
+        ("Board: Run First-Time Setup", "Configure Git + GitHub auth on the VM"),
+        ("Board: Open in Browser", "Open code-server or VS Code Tunnel"),
+        ("Board: Show Pass", "Show your Board Pass card again"),
     ]
     for i, (cmd, desc) in enumerate(commands):
         y = pdf.draw_command_row(cmd, desc, y, shade=(i % 2 == 0))

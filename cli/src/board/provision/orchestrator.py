@@ -4,13 +4,15 @@ Discovers manifests, provisions each project via ProvisionEngine,
 then generates cross-project artifacts (workspace, check script, manifest copies).
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001 — must be first
 
+import json
 import time
 from typing import TYPE_CHECKING
 
 from board.core.manifest import (
     generate_check_script,
+    generate_quickstart,
     generate_workspace,
     load_all,
 )
@@ -19,6 +21,7 @@ from board.provision.engine import ProvisionEngine, SSHRunner
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from board.models.deployment import LlmConfig
     from board.ui.console import Console
 
 
@@ -31,6 +34,7 @@ async def provision_projects(
     filter_names: list[str] | None = None,
     force: bool = False,
     quiet: bool = False,
+    llm_config: LlmConfig | None = None,
 ) -> tuple[int, int]:
     """Discover and provision all projects.
 
@@ -43,6 +47,7 @@ async def provision_projects(
         filter_names: Optional list of project names to filter by.
         force: Overwrite existing VS Code configs.
         quiet: Suppress visual output.
+        llm_config: Optional LLM provider config for env population.
 
     Returns:
         Tuple of (success_count, fail_count).
@@ -52,7 +57,7 @@ async def provision_projects(
     # Step 1: Discover manifests
     if console and not quiet:
         console.banner("Board Provisioner", f"Provisioning projects on {user}")
-        console.step(1, 6, "Discover project manifests")
+        console.step(1, 7, "Discover project manifests")
 
     manifests = load_all(manifest_dir, filter_names=filter_names)
 
@@ -69,7 +74,7 @@ async def provision_projects(
 
     # Step 2: Provision each project
     if console and not quiet:
-        console.step(2, 6, "Provision projects")
+        console.step(2, 7, "Provision projects")
 
     results: list[tuple[str, bool]] = []
     provisioned = []
@@ -86,6 +91,7 @@ async def provision_projects(
             user=user,
             force=force,
             quiet=quiet,
+            llm_config=llm_config,
         )
 
         try:
@@ -101,21 +107,42 @@ async def provision_projects(
 
     # Step 3: Generate workspace file
     if console and not quiet:
-        console.step(3, 6, "Generate workspace file")
+        console.step(3, 7, "Generate workspace file")
 
     if provisioned:
         workspace_content = generate_workspace(provisioned)
-        await ssh.run("mkdir -p ~/projects")
-        upload_cmd = f"cat > ~/projects/board.code-workspace << 'WSEOF'\n{workspace_content}\nWSEOF"
+        await ssh.run("mkdir -p ~/projects/.board")
+        upload_cmd = f"cat > ~/projects/.board/board.code-workspace << 'WSEOF'\n{workspace_content}\nWSEOF"
         await ssh.run(upload_cmd, check=False)
         if console and not quiet:
-            console.success("Uploaded board.code-workspace")
+            console.success("Uploaded .board/board.code-workspace")
+
+        # Generate ~/projects/.vscode/settings.json with port forwarding
+        ports: dict[str, dict[str, str]] = {}
+        for m in provisioned:
+            if m.vscode:
+                for port_key, port_cfg in m.vscode.ports.items():
+                    ports[port_key] = {
+                        "label": port_cfg.label,
+                        "onAutoForward": port_cfg.auto_forward,
+                    }
+        if ports:
+            settings = {
+                "remote.portsAttributes": ports,
+                "remote.autoForwardPortsSource": "process",
+            }
+            settings_json = json.dumps(settings, indent=2) + "\n"
+            await ssh.run("mkdir -p ~/projects/.vscode")
+            settings_cmd = f"cat > ~/projects/.vscode/settings.json << 'SETTINGSEOF'\n{settings_json}\nSETTINGSEOF"
+            await ssh.run(settings_cmd, check=False)
+            if console and not quiet:
+                console.success("Uploaded .vscode/settings.json (port forwarding)")
     elif console and not quiet:
         console.warn("No projects provisioned successfully, skipping workspace file")
 
     # Step 4: Generate check script
     if console and not quiet:
-        console.step(4, 6, "Generate health check script")
+        console.step(4, 7, "Generate health check script")
 
     if provisioned:
         check_content = generate_check_script(provisioned)
@@ -139,7 +166,7 @@ async def provision_projects(
 
     # Step 5: Copy manifests to VM
     if console and not quiet:
-        console.step(5, 6, "Copy manifests to VM")
+        console.step(5, 7, "Copy manifests to VM")
 
     await ssh.run("mkdir -p ~/projects/.board/project-manifests", check=False)
     for m in manifests:
@@ -160,9 +187,25 @@ async def provision_projects(
         if console and not quiet:
             console.success(f"Copied {m.name}.project.yaml")
 
-    # Step 6: Summary
+    # Step 6: Generate quickstart
     if console and not quiet:
-        console.step(6, 6, "Summary")
+        console.step(6, 7, "Generate quickstart")
+
+    if provisioned:
+        quickstart_content = generate_quickstart(provisioned)
+        await ssh.run("mkdir -p ~/projects/.board")
+        upload_cmd = (
+            f"cat > ~/projects/QUICKSTART.md << 'QSEOF'\n{quickstart_content}\nQSEOF"
+        )
+        await ssh.run(upload_cmd, check=False)
+        if console and not quiet:
+            console.success("Uploaded QUICKSTART.md")
+    elif console and not quiet:
+        console.warn("No projects provisioned successfully, skipping quickstart")
+
+    # Step 7: Summary
+    if console and not quiet:
+        console.step(7, 7, "Summary")
 
     elapsed = time.monotonic() - start_time
     elapsed_min = int(elapsed) // 60
