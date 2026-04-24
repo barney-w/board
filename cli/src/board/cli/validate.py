@@ -49,6 +49,14 @@ CLOUD_INIT_ARTIFACTS = [
         "test -f ~/.config/systemd/user/board-check.timer",
         "board-check systemd timer installed",
     ),
+    (
+        "systemctl is-active --quiet cockpit.socket",
+        "cockpit.socket is active",
+    ),
+    (
+        "docker inspect --format='{{.State.Running}}' portainer 2>/dev/null | grep -q true",
+        "portainer container running",
+    ),
 ]
 
 

@@ -1,4 +1,4 @@
-"""board shape — interactive admin control panel."""
+"""board admin — interactive admin control panel."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 
 from board.core import config as cfg
 from board.core.errors import BoardError, SSHError
+from board.models.deployment import LlmConfig
 from board.ui import console as con
 from board.ui import prompts
 
@@ -160,6 +161,31 @@ async def _provision_projects_menu() -> None:
 
     kv_name = await prompts.input_text("Key Vault name (Enter to skip)", default="")
 
+    # LLM provider
+    llm_config = LlmConfig()
+    llm_choice = await prompts.choose(
+        "LLM provider for projects:",
+        [
+            "Azure AI Foundry (Claude via Azure)",
+            "Anthropic API (direct)",
+            "Skip (configure later)",
+        ],
+    )
+    if "Foundry" in llm_choice:
+        foundry_endpoint = await prompts.input_text("Foundry endpoint URL", default="")
+        if foundry_endpoint:
+            foundry_key = await prompts.secret("Foundry API key")
+            if foundry_key:
+                llm_config = LlmConfig(
+                    provider="foundry",
+                    api_key=foundry_key,
+                    endpoint=foundry_endpoint.rstrip("/"),
+                )
+    elif "Anthropic" in llm_choice:
+        anthropic_key = await prompts.secret("Anthropic API key")
+        if anthropic_key:
+            llm_config = LlmConfig(provider="anthropic", api_key=anthropic_key)
+
     con.info(f"Provisioning projects: {' '.join(selected)}")
     con.info(f"Target: devuser@{fqdn}")
 
@@ -175,6 +201,7 @@ async def _provision_projects_menu() -> None:
                 console=con.console,
                 keyvault_name=kv_name,
                 filter_names=selected,
+                llm_config=llm_config,
             )
             con.success(f"Done: {success_count} succeeded, {fail_count} failed")
     except (SSHError, BoardError) as exc:
@@ -304,6 +331,6 @@ async def _run_admin() -> None:
             con.error(str(exc))
 
 
-def shape_command() -> None:
+def admin_command() -> None:
     """Open the admin control panel for managing boards."""
     asyncio.run(_run_admin())

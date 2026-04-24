@@ -22,6 +22,26 @@ def _resolve_env() -> str:
     return os.environ.get("BOARD_ENVIRONMENT", "personal")
 
 
+def _resolve_auth_method(name: str, env: str, region_short: str) -> str:
+    """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
+    rg = cfg.resource_group(env, region_short)
+    vm = cfg.vm_name(env, region_short, name)
+    result = subprocess.run(  # noqa: S603, S607
+        [
+            "az", "vm", "show",
+            "--resource-group", rg,
+            "--name", vm,
+            "--query", 'tags."auth-method"',
+            "-o", "tsv",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tag = result.stdout.strip()
+    return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
+
+
 def _resolve_rg(env: str | None = None) -> str:
     return cfg.resource_group(env or _resolve_env(), DEFAULT_REGION)
 
@@ -82,19 +102,58 @@ def ssh(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
 ) -> None:
     """SSH into a developer VM."""
-    fqdn = cfg.hostname(name, DEFAULT_LOCATION)
-    key_path = cfg.ssh_key_path_expanded(name)
+    env = _resolve_env()
+    auth_method = _resolve_auth_method(name, env, DEFAULT_REGION)
 
-    if not key_path.exists():
-        con.error(f"SSH key not found: {key_path}")
-        con.info(f"Generate one with: board vm keygen {name}")
-        raise typer.Exit(1)
+    if auth_method == "entra-id":
+        alias = cfg.ssh_host_alias(name)
+        rg = cfg.resource_group(env, DEFAULT_REGION)
+        vm = cfg.vm_name(env, DEFAULT_REGION, name)
+        fqdn = cfg.hostname(name, DEFAULT_LOCATION)
+        ssh_config_path = Path.home() / ".ssh" / "config"
 
-    con.info(f"Connecting to {fqdn}...")
-    subprocess.run(  # noqa: S603, S607
-        ["ssh", "-i", str(key_path), f"devuser@{fqdn}"],
-        check=False,
-    )
+        # 1. Refresh short-lived Entra ID certificates
+        from board.ssh.config_file import (
+            SERVICE_PORTS,
+            build_entra_id_config_block,
+            refresh_entra_certs,
+            write_managed_block,
+        )
+
+        con.info("Refreshing Entra ID certificates...")
+        cert_ok, entra_user = refresh_entra_certs(alias, rg, vm)
+        if not cert_ok:
+            con.error("Failed to refresh Entra ID certificates.")
+            con.info("Ensure you are signed in: az login")
+            raise typer.Exit(1)
+
+        # 2. Write/update SSH config with User + LocalForward directives
+        block = build_entra_id_config_block(
+            alias=alias, hostname=fqdn, user=entra_user or None,
+        )
+        write_managed_block(ssh_config_path, alias, block)
+
+        # 3. Connect via the SSH alias (picks up LocalForward from config)
+        con.info(f"Connecting to {vm}...")
+        con.info("Port forwarding:")
+        for _local_port, _remote_port, label, url in SERVICE_PORTS:
+            con.info(f"  {label:15s} {url}")
+        con.info("")
+        subprocess.run(["ssh", alias], check=False)  # noqa: S603, S607
+    else:
+        fqdn = cfg.hostname(name, DEFAULT_LOCATION)
+        key_path = cfg.ssh_key_path_expanded(name)
+
+        if not key_path.exists():
+            con.error(f"SSH key not found: {key_path}")
+            con.info(f"Generate one with: board vm keygen {name}")
+            raise typer.Exit(1)
+
+        con.info(f"Connecting to {fqdn}...")
+        subprocess.run(  # noqa: S603, S607
+            ["ssh", "-i", str(key_path), f"devuser@{fqdn}"],
+            check=False,
+        )
 
 
 @vm_app.command()
@@ -239,3 +298,143 @@ def keygen(
         con.info(f"Public key contents:\n  {pub_key}")
 
     asyncio.run(_keygen())
+
+
+# ── RBAC role definitions ──
+# Maps board roles to Azure RBAC roles and their scopes.
+
+BOARD_ROLES: dict[str, list[dict[str, str]]] = {
+    "admin": [
+        {"role": "Contributor", "scope": "rg"},
+        {"role": "Key Vault Administrator", "scope": "rg"},
+        {"role": "Virtual Machine Administrator Login", "scope": "vm"},
+    ],
+    "developer": [
+        {"role": "Reader", "scope": "rg"},
+        {"role": "Virtual Machine User Login", "scope": "vm"},
+    ],
+    "viewer": [
+        {"role": "Reader", "scope": "rg"},
+    ],
+}
+
+
+def _resolve_principal_id(email: str) -> str:
+    """Resolve Entra ID principal (object) ID from email."""
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "ad", "user", "show", "--id", email, "--query", "id", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not find Entra ID user: {email}")
+        raise typer.Exit(1)
+    return result.stdout.strip()
+
+
+def _resolve_vm_resource_id(rg: str, vm_name_str: str) -> str:
+    """Get the full resource ID of a VM."""
+    result = subprocess.run(  # noqa: S603, S607
+        [
+            "az", "vm", "show",
+            "--resource-group", rg,
+            "--name", vm_name_str,
+            "--query", "id",
+            "-o", "tsv",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not find VM: {vm_name_str} in {rg}")
+        raise typer.Exit(1)
+    return result.stdout.strip()
+
+
+def _resolve_rg_resource_id(rg: str) -> str:
+    """Get the full resource ID of a resource group."""
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "group", "show", "--name", rg, "--query", "id", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not find resource group: {rg}")
+        raise typer.Exit(1)
+    return result.stdout.strip()
+
+
+def _assign_role(principal_id: str, role_name: str, scope: str) -> bool:
+    """Assign an Azure RBAC role. Returns True on success."""
+    result = subprocess.run(  # noqa: S603, S607
+        [
+            "az", "role", "assignment", "create",
+            "--assignee-object-id", principal_id,
+            "--assignee-principal-type", "User",
+            "--role", role_name,
+            "--scope", scope,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        # Ignore "already exists" errors
+        if "already exists" in result.stderr.lower() or "conflict" in result.stderr.lower():
+            return True
+        con.error(f"Failed to assign {role_name}: {result.stderr.strip()}")
+        return False
+    return True
+
+
+@vm_app.command(name="grant-access")
+def grant_access(
+    email: str = typer.Argument(..., help="Developer's email address."),
+    name: str = typer.Argument(..., help="Developer name / VM name suffix (e.g. jbloggs)."),
+    role: str = typer.Option("developer", "--role", "-r", help="Board role: admin, developer, viewer."),
+    env: str = typer.Option("", "--env", help="Environment name."),
+) -> None:
+    """Grant access to a developer VM with a board role (admin/developer/viewer)."""
+    if role not in BOARD_ROLES:
+        con.error(f"Unknown role: {role}. Must be one of: {', '.join(BOARD_ROLES)}")
+        raise typer.Exit(1)
+
+    resolved_env = env or _resolve_env()
+    rg = cfg.resource_group(resolved_env, DEFAULT_REGION)
+    vm_name_str = cfg.vm_name(resolved_env, DEFAULT_REGION, name)
+
+    principal_id = _resolve_principal_id(email)
+
+    # Resolve scopes we'll need
+    rg_id: str | None = None
+    vm_id: str | None = None
+    role_defs = BOARD_ROLES[role]
+
+    needs_rg = any(r["scope"] == "rg" for r in role_defs)
+    needs_vm = any(r["scope"] == "vm" for r in role_defs)
+
+    if needs_rg:
+        rg_id = _resolve_rg_resource_id(rg)
+    if needs_vm:
+        vm_id = _resolve_vm_resource_id(rg, vm_name_str)
+
+    con.info(f"Granting '{role}' role to {email}...")
+    failures = 0
+    for role_def in role_defs:
+        scope = rg_id if role_def["scope"] == "rg" else vm_id
+        assert scope is not None
+        if _assign_role(principal_id, role_def["role"], scope):
+            con.success(f"  {role_def['role']} @ {role_def['scope']}")
+        else:
+            failures += 1
+
+    if failures:
+        con.error(f"{failures} role assignment(s) failed")
+        raise typer.Exit(1)
+
+    con.success(f"Done. {email} now has '{role}' access.")
+    if role != "viewer":
+        con.info(f"SSH: az ssh vm --resource-group {rg} --name {vm_name_str}")

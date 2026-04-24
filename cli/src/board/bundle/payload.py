@@ -20,7 +20,7 @@ def build_payload(
     resource_group: str,
     vm_name: str,
     tunnel_url: str = "",
-    ttl_days: int = 30,
+    ttl_days: int = 730,
 ) -> BundlePayload:
     """Build a :class:`BundlePayload` ready for encryption.
 

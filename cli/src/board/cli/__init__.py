@@ -18,7 +18,8 @@ app.add_typer(ssh_config_app)
 
 # ── Import and register CLI commands ──
 
-from board.cli.admin import shape_command  # noqa: E402
+from board.cli.admin import admin_command  # noqa: E402
+from board.cli.costs import costs_command  # noqa: E402
 from board.cli.export_pass import export_pass_command  # noqa: E402
 from board.cli.fleet import fleet_command  # noqa: E402
 from board.cli.infra import (  # noqa: E402
@@ -30,6 +31,7 @@ from board.cli.infra import (  # noqa: E402
     what_if_command,
 )
 from board.cli.init import init_command  # noqa: E402
+from board.cli.policies_cmd import show_command as policies_show_command  # noqa: E402
 from board.cli.projects import install_projects_command, project_status_command  # noqa: E402
 from board.cli.setup import up_command  # noqa: E402
 from board.cli.tools import rotate_key_command, wait_ready_command  # noqa: E402
@@ -37,11 +39,13 @@ from board.cli.validate import smoke_test_command  # noqa: E402
 
 # Core commands
 app.command(name="up")(up_command)
-app.command(name="shape")(shape_command)
+app.command(name="admin")(admin_command)
 app.command(name="fleet")(fleet_command)
 app.command(name="init")(init_command)
 app.command(name="smoke-test")(smoke_test_command)
 app.command(name="export-pass")(export_pass_command)
+app.command(name="costs")(costs_command)
+app.command(name="policies")(policies_show_command)
 
 # Infrastructure commands
 app.command(name="create-rg")(create_rg_command)

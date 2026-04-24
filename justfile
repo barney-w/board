@@ -121,17 +121,37 @@ ssh-config-entra name env=default_env:
     @echo ""
     @echo "Host devvm-{{name}}"
     @echo "    HostName devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
-    @echo "    User {{name}}@yourdomain.com"
     @echo "    ProxyCommand az ssh proxy --resource-group rg-{{env}}-{{default_region}}-devvm --vm-name vm-{{env}}-{{default_region}}-devvm-{{name}} --port %p"
     @echo "    ForwardAgent yes"
     @echo "    ServerAliveInterval 60"
     @echo "    ServerAliveCountMax 3"
+    @echo "    LocalForward 8080 127.0.0.1:8080"
+    @echo "    LocalForward 9091 127.0.0.1:9190"
+    @echo "    LocalForward 9444 127.0.0.1:9443"
     @echo ""
     @echo "# Usage:  ssh devvm-{{name}}"
 
 # First-time setup wizard (run on the board after first SSH login)
 setup-me name:
     ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com 'bash ~/setup-me.sh'
+
+# Access Cockpit system admin UI via SSH tunnel (localhost:9091 → VM:9190)
+cockpit name:
+    @echo "Opening SSH tunnel to Cockpit..."
+    @echo "Open http://localhost:9091 in your browser."
+    @echo "Log in with devuser / board."
+    @echo ""
+    @echo "Press Ctrl+C to close the tunnel."
+    ssh -L 9091:localhost:9190 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
+
+# Access Portainer Docker management UI via SSH tunnel (localhost:9444 → VM:9443)
+portainer name:
+    @echo "Opening SSH tunnel to Portainer..."
+    @echo "Open https://localhost:9444 in your browser."
+    @echo "Accept the self-signed certificate warning. Default admin password: boardboard12"
+    @echo ""
+    @echo "Press Ctrl+C to close the tunnel."
+    ssh -L 9444:localhost:9443 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
 
 # Access code-server via SSH tunnel (opens browser IDE at localhost:8080)
 code-server name:
@@ -143,6 +163,41 @@ code-server name:
     @echo ""
     @echo "Press Ctrl+C to close the tunnel."
     ssh -L 8080:localhost:8080 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
+
+# Forward all listening ports from a VM to localhost (dynamic discovery)
+tunnel-all name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    KEY=~/.ssh/devvm-{{name}}
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    echo "Discovering listening ports on $HOST..."
+    PORTS=$(ssh -i "$KEY" devuser@"$HOST" \
+        "ss -tlnH 2>/dev/null | awk '{print \$4}' | grep -oP '(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|localhost):?\K\d+' | sort -un | awk '\$1 <= 32767 && \$1 != 22'")
+    if [ -z "$PORTS" ]; then
+        echo "No services listening on the VM."
+        exit 0
+    fi
+    FORWARDS=""
+    SKIPPED=""
+    echo "Forwarding ports:"
+    while IFS= read -r port; do
+        if lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+            SKIPPED="$SKIPPED $port"
+        else
+            echo "  localhost:$port → VM:$port"
+            FORWARDS="$FORWARDS -L $port:localhost:$port"
+        fi
+    done <<< "$PORTS"
+    if [ -n "$SKIPPED" ]; then
+        echo "  (skipped, already in use locally:$SKIPPED)"
+    fi
+    if [ -z "$FORWARDS" ]; then
+        echo "All ports already forwarded (likely by VS Code)."
+        exit 0
+    fi
+    echo ""
+    echo "Press Ctrl+C to close all tunnels."
+    ssh $FORWARDS -N -i "$KEY" devuser@"$HOST"
 
 # Set up VS Code Tunnel on a board (interactive GitHub auth)
 tunnel-setup name:
@@ -201,8 +256,8 @@ browser-ide name:
 grant-ssh-access name email env=default_env:
     az role assignment create \
         --assignee "{{email}}" \
-        --role "Virtual Machine User Login" \
-        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-{{env}}-{{default_region}}-devvm"
+        --role "Virtual Machine Administrator Login" \
+        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-{{env}}-{{default_region}}-devvm/providers/Microsoft.Compute/virtualMachines/vm-{{env}}-{{default_region}}-devvm-{{name}}"
     @echo "{{name}} can now SSH via: az ssh vm --resource-group rg-{{env}}-{{default_region}}-devvm --name vm-{{env}}-{{default_region}}-devvm-{{name}}"
 
 # Build the VS Code extension (.vsix)

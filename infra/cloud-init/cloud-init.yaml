@@ -25,6 +25,14 @@ packages:
   - neovim
   - nano
 
+  # POSIX ACL support (setfacl for Entra ID group access)
+  - acl
+
+  # Cockpit (system admin UI — socket-activated, zero overhead when idle)
+  - apache2-utils
+  - cockpit
+  - cockpit-podman
+
 write_files:
   - path: /home/devuser/setup-me.sh
     owner: devuser:devuser
@@ -182,9 +190,9 @@ write_files:
       # ── Step 5: Quick orientation ──
       echo -e "${BOLD}Step 5: Your Workspace${NC}"
       echo ""
-      if [[ -f ~/projects/board.code-workspace ]]; then
-          echo "  Your projects are ready -- open board.code-workspace in VS Code"
-          echo "  Run 'check' any time to verify services are healthy"
+      if [[ -d ~/projects/.board ]]; then
+          echo "  Your projects are ready. Run 'check' to verify services are healthy"
+          echo ""
           echo ""
           echo "  Useful commands:"
           echo "    check         -> verify all services are running"
@@ -211,6 +219,12 @@ write_files:
       if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
           echo "  code-server:    http://localhost:8080 (via SSH tunnel)"
       fi
+      if systemctl is-active --quiet cockpit.socket 2>/dev/null; then
+          echo "  Cockpit:        http://localhost:9091 (via SSH tunnel on port 9190, login: devuser / board)"
+      fi
+      if docker inspect --format='{{.State.Running}}' portainer 2>/dev/null | grep -q true; then
+          echo "  Portainer:      http://localhost:9000 (pwd: $(cat ~/.portainer-password 2>/dev/null || echo 'see ~/.portainer-password'))"
+      fi
       echo ""
 
       # ── Signal completion (for VS Code extension first-run detection) ──
@@ -218,9 +232,9 @@ write_files:
 
       # ── Done ──
       echo -e "${BLUE}${BOLD}╭───────────────────────────────────────────────╮${NC}"
-      if [[ -f ~/projects/board.code-workspace ]]; then
-          echo -e "${BLUE}${BOLD}│  Setup complete. Open board.code-workspace   │${NC}"
-          echo -e "${BLUE}${BOLD}│  in VS Code to start coding.                 │${NC}"
+      if [[ -d ~/projects/.board ]]; then
+          echo -e "${BLUE}${BOLD}│  Setup complete. You're ready to code.        │${NC}"
+          echo -e "${BLUE}${BOLD}│  Run 'check' to verify services.             │${NC}"
       else
           echo -e "${BLUE}${BOLD}│  Setup complete. You're ready to code.        │${NC}"
           echo -e "${BLUE}${BOLD}│                                               │${NC}"
@@ -283,14 +297,11 @@ write_files:
       echo "  ${bold}Uptime${reset}        ${UPTIME}"
       echo "  ${bold}Disk${reset}          ${DISK_PCT}% used (${DISK_FREE} free)"
       echo ""
-      echo "  ${dim}check${reset}         run health checks"
-      echo "  ${dim}board-help${reset}    show all commands"
-      # Browser IDE hints (only show if services are available)
-      if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
-          echo "  ${dim}code-server${reset}   ssh -L 8080:localhost:8080 $(hostname) then http://localhost:8080"
-      fi
+      echo "  ${dim}check${reset}           run health checks"
+      echo "  ${dim}board-help${reset}      show all commands"
+      echo "  ${dim}forward-ports${reset}   show listening ports + SSH tunnel command"
       if [[ -f /home/devuser/.board/tunnel-url ]]; then
-          echo "  ${dim}tunnel${reset}        $(cat /home/devuser/.board/tunnel-url)"
+          echo "  ${dim}tunnel${reset}          $(cat /home/devuser/.board/tunnel-url)"
       fi
       echo ""
       echo "  ${dim}board v1.0.0${reset}"
@@ -337,6 +348,56 @@ write_files:
       fi
       exit 0  # Idle — safe to shut down
 
+  - path: /home/devuser/.board/forward-ports.sh
+    owner: devuser:devuser
+    permissions: "0755"
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      # Discover all listening TCP ports and print an SSH tunnel command.
+      # Usage: run on the VM, copy the output, paste on your local machine.
+
+      bold=$'\033[1m'
+      dim=$'\033[2m'
+      reset=$'\033[0m'
+
+      HOSTNAME=$(hostname)
+
+      # Collect unique ports listening on localhost or all interfaces, exclude SSH (22) and ephemeral (>32767)
+      PORTS=$(ss -tlnH 2>/dev/null \
+        | awk '{print $4}' \
+        | grep -oP '(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|localhost):?\K\d+' \
+        | sort -un \
+        | awk '$1 <= 32767 && $1 != 22')
+
+      if [ -z "$PORTS" ]; then
+          echo "No services listening."
+          exit 0
+      fi
+
+      echo ""
+      echo "${bold}Listening ports on ${HOSTNAME}${reset}"
+      echo ""
+
+      # Show what's on each port
+      while IFS= read -r port; do
+          proc=$(ss -tlnpH 2>/dev/null | grep ":${port} " | head -1 | grep -oP 'users:\(\("\K[^"]+' || echo "unknown")
+          printf "  %s%-5s%s  %s\n" "$bold" "$port" "$reset" "$proc"
+      done <<< "$PORTS"
+
+      echo ""
+      echo "${bold}SSH tunnel command (run from your local machine):${reset}"
+      echo ""
+
+      CMD="ssh"
+      while IFS= read -r port; do
+          CMD="$CMD -L ${port}:localhost:${port}"
+      done <<< "$PORTS"
+      CMD="$CMD $HOSTNAME"
+
+      echo "  $CMD"
+      echo ""
+
   - path: /home/devuser/.config/systemd/user/board-check.service
     owner: devuser:devuser
     permissions: "0644"
@@ -369,15 +430,69 @@ runcmd:
   - chown -R devuser:devuser /home/devuser/.config
 
   # ── Docker: add repo and install ──
+  # Note: apt-get uses DPkg::Lock::Timeout to wait for locks held by
+  # unattended-upgrades or other apt processes that run on first boot.
   - |
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
       > /etc/apt/sources.list.d/docker.list
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    apt-get -o DPkg::Lock::Timeout=120 update
+    apt-get -o DPkg::Lock::Timeout=120 install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
     usermod -aG docker devuser
+    echo "devuser:$(openssl rand -base64 24)" | chpasswd
+
+  # ── Docker socket: open to all local users (single-purpose dev VM) ──
+  # Entra ID users aren't in the docker group on first login, and group
+  # membership requires re-login to take effect. 0666 is fine here —
+  # the VM is single-purpose and the socket is not network-exposed.
+  - mkdir -p /etc/systemd/system/docker.service.d
+  - |
+    cat > /etc/systemd/system/docker.service.d/socket-permissions.conf << 'DOCKERPERM'
+    [Service]
+    ExecStartPost=/bin/chmod 0666 /var/run/docker.sock
+    DOCKERPERM
+  - systemctl daemon-reload
+  - systemctl restart docker
+
+  # ── Cockpit: override socket to localhost-only on port 9190 ──
+  # Default 9090 conflicts with common dev tools (minio, Prometheus, etc), so we use 9190.
+  - mkdir -p /etc/systemd/system/cockpit.socket.d
+  - |
+    cat > /etc/systemd/system/cockpit.socket.d/listen-localhost.conf << 'COCKPITOVERRIDE'
+    [Socket]
+    ListenStream=
+    ListenStream=127.0.0.1:9190
+    COCKPITOVERRIDE
+  - systemctl daemon-reload
+  # Cockpit's package install auto-starts the socket with the default config (all interfaces).
+  # After writing our localhost-only drop-in above, we must restart (not just enable) so systemd
+  # picks up the new ListenStream. enable --now is a no-op if already running.
+  - systemctl enable cockpit.socket
+  - 'systemctl restart cockpit.socket || echo "[board] WARN: cockpit.socket failed to start (non-fatal)"'
+  # Remove Cockpit's default MOTD/issue lines — our custom MOTD already shows correct SSH-tunnel instructions
+  - rm -f /etc/motd.d/cockpit /etc/issue.d/cockpit.issue
+
+  # ── Portainer CE: Docker management UI on localhost:9443 ──
+  - systemctl is-active --wait docker
+  - |
+    # Generate a unique random admin password for this VM
+    PORTAINER_PWD=$(openssl rand -base64 18 | tr -d '=/+' | head -c 16)
+    echo "$PORTAINER_PWD" > /home/devuser/.portainer-password
+    chown devuser:devuser /home/devuser/.portainer-password
+    chmod 400 /home/devuser/.portainer-password
+    PORTAINER_HASH=$(htpasswd -nbBC 10 admin "$PORTAINER_PWD" | cut -d: -f2)
+    sudo -u devuser docker run -d \
+      --name portainer \
+      --restart unless-stopped \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v portainer_data:/data \
+      -p 127.0.0.1:9000:9000 \
+      -p 127.0.0.1:9443:9443 \
+      portainer/portainer-ce:lts \
+      --admin-password "$PORTAINER_HASH" \
+      || echo "[board] WARN: Portainer start failed (non-fatal)"
 
   # ── Enable systemd user services without login (for persistent dev services) ──
   - loginctl enable-linger devuser
@@ -388,8 +503,8 @@ runcmd:
       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       > /etc/apt/sources.list.d/nodesource.list
-    apt-get update
-    apt-get install -y nodejs
+    apt-get -o DPkg::Lock::Timeout=120 update
+    apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
 
   # ── pnpm via corepack (pinned to match surf-kit packageManager field) ──
   - corepack enable
@@ -397,8 +512,8 @@ runcmd:
 
   # ── Python: install from deadsnakes if not already 3.12+ ──
   - add-apt-repository -y ppa:deadsnakes/ppa
-  - apt-get update
-  - apt-get install -y python3.12 python3.12-venv python3.12-dev
+  - apt-get -o DPkg::Lock::Timeout=120 update
+  - apt-get -o DPkg::Lock::Timeout=120 install -y python3.12 python3.12-venv python3.12-dev
   - update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
   # ── uv: Python package manager ──
@@ -418,8 +533,8 @@ runcmd:
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       | tee /etc/apt/sources.list.d/github-cli.list
-    apt-get update
-    apt-get install -y gh
+    apt-get -o DPkg::Lock::Timeout=120 update
+    apt-get -o DPkg::Lock::Timeout=120 install -y gh
 
   # ── GitHub Copilot CLI extension (best-effort — requires gh auth, installed properly in setup-me.sh step 3) ──
   - su - devuser -c "gh extension install github/gh-copilot 2>/dev/null || true"
@@ -482,10 +597,39 @@ runcmd:
   - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
   - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
   - sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
-  - sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+  - sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 6/' /etc/ssh/sshd_config
   - sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
   - sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 2/' /etc/ssh/sshd_config
   - systemctl restart ssh
+
+  # ── Entra ID (AAD) user access to devuser home ──
+  - |
+    cat > /etc/profile.d/board-entra-acl.sh << 'ENTRA_ACL'
+    # One-shot: grant aad_admins group access to devuser home on first AAD login
+    if getent group aad_admins >/dev/null 2>&1; then
+      MARKER="/home/devuser/.board/.acl-applied"
+      if [ ! -f "$MARKER" ]; then
+        sudo setfacl -R -m g:aad_admins:rwX /home/devuser 2>/dev/null
+        sudo setfacl -R -d -m g:aad_admins:rwX /home/devuser 2>/dev/null
+        sudo usermod -aG docker "$(whoami)" 2>/dev/null
+        sudo mkdir -p /home/devuser/.board 2>/dev/null
+        sudo touch "$MARKER" 2>/dev/null
+      fi
+    fi
+    ENTRA_ACL
+
+  # ── Entra users: redirect to devuser workspace ──
+  # /etc/bash.bashrc runs for all interactive shells (including VS Code terminals)
+  - |
+    cat >> /etc/bash.bashrc << 'ENTRA_REDIRECT'
+
+    # Board: Entra ID users work in devuser's home, not their own
+    if [ "$HOME" != "/home/devuser" ] && id -nG 2>/dev/null | grep -qw aad_admins; then
+      export PATH="/home/devuser/.local/bin:$PATH"
+      export BOARD_USER="devuser"
+      cd /home/devuser/projects 2>/dev/null || true
+    fi
+    ENTRA_REDIRECT
 
   # ── Create dev workspace ──
   - mkdir -p /home/devuser/projects
@@ -666,6 +810,7 @@ runcmd:
     alias where='which'
     alias findstr='grep'
     alias notepad='nvim'
+    alias forward-ports='~/.board/forward-ports.sh'
 
     # Help command
     board-help() {
@@ -676,11 +821,17 @@ runcmd:
       Health & Status
         check              run all health checks
         board-help         show this reference
+        forward-ports      show all listening ports + SSH tunnel command
 
       Services
         Ctrl+Shift+P in VS Code -> "Run Task" for project tasks, or:
         systemctl --user restart <service>    restart a service
         journalctl --user -u <service> -f     stream service logs
+
+      Browser Tools (auto-forwarded by VS Code, or use forward-ports)
+        code-server    http://localhost:8080   browser IDE
+        cockpit        http://localhost:9091   system admin, logs, files
+        portainer      http://localhost:9000   Docker management (pwd in ~/.portainer-password)
 
       Git
         gs                     git status
@@ -697,7 +848,7 @@ runcmd:
       Projects
         ~/projects/        your project workspace
 
-      Need help? Message your shaper or check the docs.
+      Need help? Message your admin or check the docs.
       '
     }
 
