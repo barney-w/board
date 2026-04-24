@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 from board.models.deployment import PhaseResult
 
 if TYPE_CHECKING:
+    from board.models.deployment import LlmConfig
     from board.models.manifest import ProjectManifest
     from board.ui.console import Console
 
@@ -26,16 +27,16 @@ class SSHRunner(Protocol):
 
 TTFC_HOOK = r"""#!/usr/bin/env bash
 # Board: Time to First Commit measurement (one-time, self-removing)
-if [[ -f ~/.board/shaped_at ]] && [[ ! -f ~/.board/first_push_at ]]; then
+if [[ -f ~/.board/created_at ]] && [[ ! -f ~/.board/first_push_at ]]; then
     date -Iseconds > ~/.board/first_push_at
-    shaped=$(date -d "$(cat ~/.board/shaped_at)" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$(cat ~/.board/shaped_at | cut -c1-19)" +%s 2>/dev/null || echo 0)
+    created=$(date -d "$(cat ~/.board/created_at)" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$(cat ~/.board/created_at | cut -c1-19)" +%s 2>/dev/null || echo 0)
     pushed=$(date -d "$(cat ~/.board/first_push_at)" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$(cat ~/.board/first_push_at | cut -c1-19)" +%s 2>/dev/null || echo 0)
-    if (( shaped > 0 && pushed > 0 )); then
-        delta=$(( (pushed - shaped) / 60 ))
+    if (( created > 0 && pushed > 0 )); then
+        delta=$(( (pushed - created) / 60 ))
         cat > ~/.board/metrics.json << METRICS
 {
   "time_to_first_commit_minutes": $delta,
-  "shaped_at": "$(cat ~/.board/shaped_at)",
+  "created_at": "$(cat ~/.board/created_at)",
   "first_push_at": "$(cat ~/.board/first_push_at)",
   "board_version": "2.0.0"
 }
@@ -66,6 +67,7 @@ class ProvisionEngine:
         user: str = "devuser",
         force: bool = False,
         quiet: bool = False,
+        llm_config: LlmConfig | None = None,
     ) -> None:
         self.ssh = ssh
         self.manifest = manifest
@@ -74,6 +76,7 @@ class ProvisionEngine:
         self.user = user
         self.force = force
         self.quiet = quiet
+        self.llm_config = llm_config
         self.warnings: list[str] = []
         self.errors: list[str] = []
         self.phases: list[PhaseResult] = []
@@ -158,7 +161,7 @@ class ProvisionEngine:
         return self.phases
 
     async def _write_board_config(self) -> None:
-        """Write ~/.board/config and shaped_at timestamp."""
+        """Write ~/.board/config and created_at timestamp."""
         await self._run(
             f"sudo mkdir -p /home/{self.user}/.board && "
             f"sudo chown {self.user}:{self.user} /home/{self.user}/.board"
@@ -179,10 +182,10 @@ class ProvisionEngine:
         else:
             self._warn("Could not write ~/.board/config")
 
-        if await self._run_ok("date -Iseconds > ~/.board/shaped_at"):
+        if await self._run_ok("date -Iseconds > ~/.board/created_at"):
             self._success("Recorded board creation timestamp")
         else:
-            self._warn("Could not write ~/.board/shaped_at")
+            self._warn("Could not write ~/.board/created_at")
 
     def _record_phase(self, phase: int, name: str, success: bool, start: float) -> PhaseResult:
         result = PhaseResult(
@@ -318,6 +321,10 @@ class ProvisionEngine:
                     f'--name "{secret_name}" --query \'value\' -o tsv 2>/dev/null || echo "")'
                 )
                 script_lines.append(f'  echo "{env_var}=${{secret_val}}" >> "$ENV_FILE"')
+                script_lines.append(
+                    f'  [[ -z "$secret_val" ]] && echo "  WARNING: {env_var} is empty '
+                    f'(secret \\"{secret_name}\\" not found in Key Vault)" >&2'
+                )
 
             script_lines.append("fi")
 
@@ -354,6 +361,48 @@ class ProvisionEngine:
                     self._warn(f"Failed to copy {fallback} to {self.manifest.env.file}")
             else:
                 self._info("No Key Vault and no fallback defined, skipping .env")
+
+        # Append LLM-specific env vars (from setup wizard config)
+        if self.llm_config and self.llm_config.provider != "none":
+            env_lines: list[str] = []
+
+            if self.llm_config.provider == "foundry":
+                if self.llm_config.endpoint:
+                    endpoint = self.llm_config.endpoint.rstrip("/")
+                    env_lines.append(f"ANTHROPIC_FOUNDRY_BASE_URL={endpoint}/anthropic/")
+                    env_lines.append(f"AZURE_OPENAI_ENDPOINT={endpoint}")
+                if self.llm_config.api_key:
+                    env_lines.append(f"ANTHROPIC_FOUNDRY_API_KEY={self.llm_config.api_key}")
+
+            elif self.llm_config.provider == "anthropic":
+                if self.llm_config.api_key:
+                    env_lines.append(f"ANTHROPIC_API_KEY={self.llm_config.api_key}")
+
+            if env_lines:
+                # Only write vars that the manifest actually references
+                manifest_vars = set()
+                if self.manifest.env.keyvault_secrets:
+                    manifest_vars.update(self.manifest.env.keyvault_secrets.keys())
+                if self.manifest.env.hardcoded:
+                    manifest_vars.update(self.manifest.env.hardcoded.keys())
+                if self.manifest.env.required:
+                    manifest_vars.update(self.manifest.env.required)
+
+                filtered = [
+                    line for line in env_lines
+                    if line.split("=", 1)[0] in manifest_vars or not manifest_vars
+                ]
+
+                if filtered:
+                    append_script = "\n".join(
+                        f'echo "{line}" >> "{env_file}"' for line in filtered
+                    )
+                    if await self._run_ok(f"bash -c '{append_script}'"):
+                        for line in filtered:
+                            var_name = line.split("=", 1)[0]
+                            self._success(f"{var_name} (from LLM config)")
+                    else:
+                        self._warn("Failed to append LLM env vars to .env")
 
         return self._record_phase(3, "env", True, start)
 
@@ -459,6 +508,8 @@ class ProvisionEngine:
 
         from board.core.manifest import generate_systemd_unit
 
+        dev_mode = self.manifest.dev is not None
+
         for svc in self.manifest.services:
             self._info(f"Setting up {svc.name}...")
             unit_content = generate_systemd_unit(svc, self.project_path)
@@ -470,6 +521,19 @@ class ProvisionEngine:
                 f"{unit_content}\nUNITEOF"
             )
             await self._run(upload_cmd)
+
+            if dev_mode:
+                # Dev mode: install unit but don't auto-start — developer runs
+                # interactive commands (e.g. just dev) instead
+                if await self._run_ok("systemctl --user daemon-reload"):
+                    self._success(
+                        f"{svc.name} unit installed "
+                        f"(run '{self.manifest.dev.run}' or "  # type: ignore[union-attr]
+                        f"'systemctl --user start {svc.name}' to start)"
+                    )
+                else:
+                    self._warn(f"Failed to reload systemd units for {svc.name}")
+                continue
 
             if await self._run_ok(
                 f"systemctl --user daemon-reload && systemctl --user enable --now {svc.name}"
@@ -573,7 +637,12 @@ class ProvisionEngine:
         if self.manifest.env and self.manifest.env.required and self.manifest.env.file:
             self._info("Checking required environment variables...")
             env_path = f"{self.project_path}/{self.manifest.env.file}"
+            is_foundry = self.llm_config and self.llm_config.provider == "foundry"
             for var_name in self.manifest.env.required:
+                # Foundry auth replaces direct API key — skip this check
+                if var_name == "ANTHROPIC_API_KEY" and is_foundry:
+                    self._info(f"{var_name} skipped (using Foundry credentials)")
+                    continue
                 if await self._run_ok(f"grep -q '^{var_name}=.\\+' '{env_path}'"):
                     self._success(f"{var_name} is set")
                 else:

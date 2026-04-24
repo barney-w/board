@@ -1,0 +1,30 @@
+# Board Policies — enforced by CLI before provisioning.
+# See: plan-devtestlabs-parity-and-security.md Part 2 (Priority 2)
+
+max_vms_per_user: 1
+max_vms_total: 20
+
+allowed_vm_sizes:
+  - Standard_D2s_v6
+  - Standard_D4s_v6
+  - Standard_D2s_v5
+
+allowed_regions:
+  - australiaeast
+
+auto_shutdown:
+  enabled: true
+  time: "1900"
+  timezone: AUS Eastern Standard Time
+  user_can_override: false
+
+auto_start:
+  enabled: false
+  time: "0800"
+  timezone: AUS Eastern Standard Time
+
+expiration:
+  enabled: false
+  max_days: 90
+
+require_entra_auth: true
