@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import typer
@@ -13,6 +14,24 @@ from board.ui import prompts
 
 DEFAULT_LOCATION = "australiaeast"
 DEFAULT_REGION = "aue"
+
+
+def _resolve_auth_method(rg: str, vm: str) -> str:
+    """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
+    result = subprocess.run(  # noqa: S603, S607
+        [
+            "az", "vm", "show",
+            "--resource-group", rg,
+            "--name", vm,
+            "--query", 'tags."auth-method"',
+            "-o", "tsv",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tag = result.stdout.strip()
+    return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
 
 
 def _find_vsix() -> Path | None:
@@ -29,6 +48,7 @@ async def _run_export_pass(
     environment: str = "",
     region: str = "",
     region_short: str = "",
+    auth_override: str = "",
 ) -> None:
     """Create an encrypted board pass."""
     # Resolve parameters
@@ -48,21 +68,45 @@ async def _run_export_pass(
     fqdn = cfg.hostname(name, region)
     rg = cfg.resource_group(environment, region_short)
     vm = cfg.vm_name(environment, region_short, name)
+
+    # Verify the VM exists before generating a pass
+    vm_check = subprocess.run(
+        ["az", "vm", "show", "--resource-group", rg, "--name", vm, "--query", "name", "-o", "tsv"],
+        capture_output=True, text=True, check=False,
+    )
+    if vm_check.returncode != 0 or not vm_check.stdout.strip():
+        con.error(f"VM not found: {vm} in {rg}")
+        con.info(f"Check the developer name and environment are correct.")
+        con.info(f"List VMs with: board vm ls --env {environment}")
+        return
+
+    # Auth method: override or auto-detect from VM tag
+    if auth_override in ("entra-id", "ssh-key"):
+        auth_method = auth_override
+        con.info(f"Auth method: {auth_method} (forced)")
+    else:
+        auth_method = _resolve_auth_method(rg, vm)
+        con.info(f"Auth method: {auth_method}")
+
+    # Read SSH keys (only needed for ssh-key auth)
+    private_key = ""
+    public_key = ""
     key_path = cfg.ssh_key_path_expanded(name)
 
-    # Read SSH keys
-    if not key_path.exists():
-        con.error(f"SSH private key not found: {key_path}")
-        con.info(f"Generate one with: board vm keygen {name}")
-        return
+    if auth_method == "ssh-key":
 
-    pub_path = key_path.with_suffix(".pub")
-    if not pub_path.exists():
-        con.error(f"SSH public key not found: {pub_path}")
-        return
+        if not key_path.exists():
+            con.error(f"SSH private key not found: {key_path}")
+            con.info(f"Generate one with: board vm keygen {name}")
+            return
 
-    private_key = key_path.read_text()
-    public_key = pub_path.read_text().strip()
+        pub_path = key_path.with_suffix(".pub")
+        if not pub_path.exists():
+            con.error(f"SSH public key not found: {pub_path}")
+            return
+
+        private_key = key_path.read_text()
+        public_key = pub_path.read_text().strip()
 
     # Get passphrase
     passphrase = await prompts.secret("Passphrase for board pass (min 8 chars)")
@@ -85,18 +129,16 @@ async def _run_export_pass(
         region_short=region_short,
         hostname=fqdn,
         username="devuser",
-        auth_method="ssh-key",
+        auth_method=auth_method,
         ssh_private_key=private_key,
         ssh_public_key=public_key,
         resource_group=rg,
         vm_name=vm,
     )
 
-    # Check for tunnel URL
-    tunnel_url_path = key_path.parent / f".board-tunnel-{name}"
-    if tunnel_url_path.exists():
-        # If we stored the tunnel URL, we could add it to browserIde
-        pass
+    # TODO: populate browserIde in payload once code-server password or
+    # VS Code tunnel URL provisioning is implemented. The extension already
+    # handles the browserIde field if present — see bundle.ts step 10b.
 
     # Encrypt
     from board.bundle.crypto import encrypt
@@ -125,7 +167,7 @@ async def _run_export_pass(
             region=region,
             region_short=region_short,
             vm_name=vm,
-            auth_method="ssh-key",
+            auth_method=auth_method,
             issued_at=payload.issued_at or "",
             valid_until=payload.valid_until or "",
         )
@@ -154,7 +196,7 @@ async def _run_export_pass(
         region=region,
         region_short=region_short,
         hostname=fqdn,
-        auth_method="ssh-key",
+        auth_method=auth_method,
         filename=bundle_filename,
         issued_at=payload.issued_at or "",
         valid_until=payload.valid_until or "",
@@ -171,6 +213,7 @@ def export_pass_command(
     environment: str = typer.Option("", "--env", help="Environment name."),
     region: str = typer.Option("", "--region", help="Azure region."),
     region_short: str = typer.Option("", "--region-short", help="Short region code."),
+    auth: str = typer.Option("", "--auth", help="Force auth method: entra-id or ssh-key (default: auto-detect from VM tag)."),
 ) -> None:
     """Create an encrypted board pass for a developer."""
-    asyncio.run(_run_export_pass(name, environment, region, region_short))
+    asyncio.run(_run_export_pass(name, environment, region, region_short, auth_override=auth))

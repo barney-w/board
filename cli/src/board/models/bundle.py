@@ -58,9 +58,9 @@ class BundlePayload(BaseModel):
     region_short: str
     hostname: str
     username: str
-    auth_method: str = "ssh-key"
-    ssh_private_key: str
-    ssh_public_key: str
+    auth_method: str = "entra-id"
+    ssh_private_key: str = ""
+    ssh_public_key: str = ""
     resource_group: str
     vm_name: str
     issued_at: str | None = None

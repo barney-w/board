@@ -20,7 +20,7 @@ export function getConfig(): BoardConfig {
     environment: cfg.get<string>('environment', 'personal'),
     region: cfg.get<string>('region', 'australiaeast'),
     regionShort: cfg.get<string>('regionShort', 'aue'),
-    authMethod: cfg.get<'ssh-key' | 'entra-id'>('authMethod', 'ssh-key'),
+    authMethod: cfg.get<'ssh-key' | 'entra-id'>('authMethod', 'entra-id'),
     autoStartVm: cfg.get<boolean>('autoStartVm', true),
     autoOpenTerminals: cfg.get<boolean>('autoOpenTerminals', true),
     pollIntervalSeconds: cfg.get<number>('pollIntervalSeconds', 60),

@@ -39,6 +39,10 @@ class ProvisionError(BoardError):
     """Provisioning phase failed."""
 
 
+class PolicyViolationError(BoardError):
+    """Deployment blocked by policy."""
+
+
 async def retry[T](
     fn: Callable[..., Awaitable[T]],
     *args: object,

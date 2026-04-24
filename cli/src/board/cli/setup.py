@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import time
 from pathlib import Path
 
 import typer
 
 from board.core import config as cfg
-from board.core.errors import BoardError, DeploymentError, SSHError
-from board.models.deployment import DeploymentConfig
+from board.core import policies as pol
+from board.core.errors import BoardError, DeploymentError, PolicyViolationError, SSHError
+from board.models.deployment import DeploymentConfig, LlmConfig
 from board.ui import console as con
 from board.ui import prompts
 
@@ -64,6 +66,20 @@ def _cost_from_sku(sku: str) -> str:
     return "unknown"
 
 
+async def _detect_public_ip() -> str:
+    """Best-effort detection of the caller's public IP address."""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+            async with session.get("https://api.ipify.org") as resp:
+                if resp.status == 200:
+                    return (await resp.text()).strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _find_manifest_dir() -> Path:
     """Locate the projects/ manifest directory."""
     cwd = Path.cwd()
@@ -94,7 +110,7 @@ async def _run_up(
     # [1/5] Configure
     # ══════════════════════════════════════════════════
 
-    con.ascii_banner("shape a new board")
+    con.ascii_banner("create a new board")
     con.step(1, TOTAL_STEPS, "Configure")
 
     # Persona
@@ -199,13 +215,138 @@ async def _run_up(
                 )
                 create_kv = True
             else:
-                con.info("Secrets can be added later with: board shape")
+                con.info("Secrets can be added later with: board admin")
+
+    # LLM provider
+    llm_config = LlmConfig()
+
+    if selected_projects and not non_interactive:
+        # Check if any selected project needs LLM env vars
+        has_llm_projects = False
+        try:
+            for m in manifests:  # type: ignore[possibly-undefined]
+                if m.env and m.env.keyvault_secrets:
+                    for key in m.env.keyvault_secrets:
+                        if "ANTHROPIC" in key or "OPENAI" in key:
+                            has_llm_projects = True
+                            break
+        except NameError:
+            pass
+
+        if has_llm_projects:
+            llm_choice = await prompts.choose(
+                "LLM provider for projects:",
+                [
+                    "Azure AI Foundry (Claude via Azure)",
+                    "Anthropic API (direct)",
+                    "Skip (configure later)",
+                ],
+            )
+
+            if "Foundry" in llm_choice:
+                foundry_endpoint = await prompts.input_text(
+                    "Foundry endpoint URL",
+                    default="",
+                )
+                if not foundry_endpoint:
+                    con.warn("No endpoint provided, skipping LLM config")
+                else:
+                    # Normalise endpoint (strip trailing slash for consistency)
+                    foundry_endpoint = foundry_endpoint.rstrip("/")
+                    foundry_key = await prompts.secret("Foundry API key")
+                    if foundry_key:
+                        llm_config = LlmConfig(
+                            provider="foundry",
+                            api_key=foundry_key,
+                            endpoint=foundry_endpoint,
+                        )
+                        con.success(f"Foundry: {foundry_endpoint}")
+                    else:
+                        con.warn("No API key provided, skipping LLM config")
+
+            elif "Anthropic" in llm_choice:
+                anthropic_key = await prompts.secret("Anthropic API key")
+                if anthropic_key:
+                    llm_config = LlmConfig(provider="anthropic", api_key=anthropic_key)
+                    con.success("Anthropic API: key provided")
+                else:
+                    con.warn("No API key provided, skipping LLM config")
+
+            else:
+                con.info("LLM credentials can be added later with: board admin")
+
+    # Authentication method
+    auth_method = await prompts.choose(
+        "Authentication method:",
+        [
+            "Entra ID (recommended -- no SSH keys, tenant-locked)",
+            "SSH key (classic -- generate or bring your own key)",
+        ],
+        default="Entra ID (recommended -- no SSH keys, tenant-locked)",
+    )
+    auth_method = "entra-id" if "Entra" in auth_method else "ssh-key"
+
+    # Resolve Entra ID details
+    tenant_id = ""
+    dev_principal_id = ""
+
+    if auth_method == "entra-id":
+        tenant_id_result = subprocess.run(
+            ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
+            capture_output=True, text=True, check=False,
+        )
+        if tenant_id_result.returncode != 0 or not tenant_id_result.stdout.strip():
+            con.error("Could not resolve tenant ID. Ensure you are logged in with 'az login'.")
+            raise typer.Abort()
+        tenant_id = tenant_id_result.stdout.strip()
+
+        if is_self:
+            entra_self = await prompts.confirm(
+                "Is this board for yourself (the currently signed-in Azure user)?",
+                default=True,
+            )
+        else:
+            entra_self = False
+
+        if entra_self:
+            principal_result = subprocess.run(
+                ["az", "ad", "signed-in-user", "show", "--query", "id", "-o", "tsv"],
+                capture_output=True, text=True, check=False,
+            )
+            if principal_result.returncode != 0 or not principal_result.stdout.strip():
+                con.error("Could not resolve your Entra ID object ID.")
+                raise typer.Abort()
+            dev_principal_id = principal_result.stdout.strip()
+        else:
+            dev_email = await prompts.input_text("Developer's email address:")
+            if not dev_email:
+                raise typer.Abort()
+            principal_result = subprocess.run(
+                ["az", "ad", "user", "show", "--id", dev_email, "--query", "id", "-o", "tsv"],
+                capture_output=True, text=True, check=False,
+            )
+            if principal_result.returncode != 0 or not principal_result.stdout.strip():
+                con.error(f"Could not find Entra ID user: {dev_email}")
+                raise typer.Abort()
+            dev_principal_id = principal_result.stdout.strip()
+
+        con.success(f"Entra ID: tenant {tenant_id[:8]}..., principal {dev_principal_id[:8]}...")
 
     # SSH key
     key_path = deploy_cfg.ssh_key_path_expanded
     ssh_pub_key = ""
 
-    if non_interactive:
+    if auth_method == "entra-id":
+        # Entra ID: silently generate an ephemeral keypair for admin automation only
+        if dry_run:
+            ssh_pub_key = "dry-run-placeholder"
+            con.success("Auth: Entra ID (admin key skipped in dry run)")
+        else:
+            from board.ssh.keys import generate_keypair
+
+            _, ssh_pub_key = await generate_keypair(key_path)
+            con.success("Auth: Entra ID (ephemeral admin key generated)")
+    elif non_interactive:
         if key_path.exists():
             ssh_pub_key = key_path.with_suffix(".pub").read_text().strip()
             con.success(f"Using existing SSH key: {key_path}")
@@ -270,6 +411,41 @@ async def _run_up(
         if vm_sku == "custom":
             vm_sku = await prompts.input_text("Enter Azure VM SKU", default="Standard_D2s_v6")
 
+    # SSH source IP restriction
+    env_ssh_source_ip = os.environ.get("BOARD_SSH_SOURCE_IP", "")
+    if non_interactive:
+        allowed_ssh_source_ip = env_ssh_source_ip or "*"
+        con.success(f"SSH source: {allowed_ssh_source_ip}")
+    else:
+        detected_ip = ""
+        if not env_ssh_source_ip:
+            detected_ip = await _detect_public_ip()
+        ip_default = env_ssh_source_ip or detected_ip or "*"
+        con.info("Restrict SSH access to a source IP/CIDR (e.g. 203.0.113.0/24)")
+        con.info("Use * to allow any source (not recommended for production)")
+        if detected_ip:
+            con.info(f"Detected your public IP: {detected_ip}")
+        allowed_ssh_source_ip = await prompts.input_text(
+            "Allowed SSH source IP/CIDR",
+            default=ip_default,
+        )
+
+    # Auto-start schedule
+    env_auto_start = os.environ.get("BOARD_AUTO_START", "")
+    if non_interactive:
+        enable_auto_start = env_auto_start.lower() in ("1", "true", "yes")
+    else:
+        enable_auto_start = await prompts.confirm(
+            "Enable auto-start? (starts VM on weekday mornings)",
+            default=False,
+        )
+    auto_start_time = "0800"
+    if enable_auto_start and not non_interactive:
+        auto_start_time = await prompts.input_text(
+            "Auto-start time (HHmm, local timezone)",
+            default="0800",
+        )
+
     # ══════════════════════════════════════════════════
     # [2/5] Authenticate
     # ══════════════════════════════════════════════════
@@ -296,14 +472,20 @@ async def _run_up(
     con.step(3, TOTAL_STEPS, "Review")
 
     cost_compute = _cost_from_sku(vm_sku)
+    auth_display = "Entra ID (tenant-locked)" if auth_method == "entra-id" else "SSH key"
+    auto_start_display = f"{auto_start_time[:2]}:{auto_start_time[2:]} AEST (weekdays)" if enable_auto_start else "disabled"
+    ssh_source_display = allowed_ssh_source_ip if allowed_ssh_source_ip != "*" else "* (any -- not recommended)"
     summary_lines = [
         f"Developer:     {dev_name}",
         f"Environment:   {environment}",
+        f"Auth:          {auth_display}",
         f"VM Size:       {vm_sku}",
         f"Region:        {location}",
         "OS:            Ubuntu 24.04 LTS",
         "Disk:          128 GB Standard SSD",
+        f"SSH source:    {ssh_source_display}",
         "Auto-shutdown: 19:00 AEST",
+        f"Auto-start:   {auto_start_display}",
         "",
         "Estimated monthly cost:",
         f"  Compute (with auto-shutdown): {cost_compute}",
@@ -316,18 +498,42 @@ async def _run_up(
         summary_lines.append(f"Projects:       {' '.join(selected_projects)}")
     if kv_name:
         summary_lines.append(f"Key Vault:      {kv_name}")
+    if llm_config.provider == "foundry":
+        summary_lines.append(f"LLM:            Azure AI Foundry ({llm_config.endpoint})")
+    elif llm_config.provider == "anthropic":
+        summary_lines.append("LLM:            Anthropic API (direct)")
 
     con.summary_box("Deployment Summary", summary_lines)
 
-    if not await prompts.confirm("Shape this board?"):
+    # Policy enforcement
+    policies = pol.load()
+    if policies is not None:
+        con.info("Checking policies (board.policies.yaml)...")
+        try:
+            warnings = pol.enforce(
+                policies,
+                vm_sku=vm_sku,
+                region=location,
+                auth_method=auth_method,
+                developer_name=dev_name,
+                resource_group=deploy_cfg.resource_group,
+            )
+            for w in warnings:
+                con.warn(w)
+            con.success("Policies: all checks passed")
+        except PolicyViolationError as exc:
+            con.error(str(exc))
+            raise typer.Exit(1) from exc
+
+    if not await prompts.confirm("Create this board?"):
         con.info("Cancelled.")
         raise typer.Exit(0)
 
     # ══════════════════════════════════════════════════
-    # [4/5] Shape
+    # [4/5] Provision
     # ══════════════════════════════════════════════════
 
-    con.step(4, TOTAL_STEPS, "Shape")
+    con.step(4, TOTAL_STEPS, "Provision")
 
     if dry_run:
         con.success(f"[DRY RUN] Would create resource group: {deploy_cfg.resource_group}")
@@ -371,7 +577,7 @@ async def _run_up(
             from board.azure.auth import get_tenant_id
             from board.azure.keyvault import create_or_recover_vault
 
-            tenant_id = await get_tenant_id()
+            kv_tenant_id = await get_tenant_id()
 
             with con.spin(f"Creating Key Vault: {kv_name}..."):
                 await create_or_recover_vault(
@@ -380,12 +586,47 @@ async def _run_up(
                     deploy_cfg.resource_group,
                     kv_name,
                     location,
-                    tenant_id,
+                    kv_tenant_id,
                 )
+            kv_resource_id = (
+                f"/subscriptions/{sub_id}"
+                f"/resourceGroups/{deploy_cfg.resource_group}"
+                f"/providers/Microsoft.KeyVault/vaults/{kv_name}"
+            )
             con.success(f"Key Vault: {kv_name}")
         except BoardError as exc:
             con.warn(f"Key Vault creation issue: {exc}")
             provision_warnings.append(f"Key Vault: {exc}")
+
+    # Auto-populate Key Vault with LLM credentials
+    if kv_name and llm_config.provider != "none":
+        try:
+            llm_secrets: dict[str, str] = {}
+            if llm_config.provider == "foundry" and llm_config.api_key and llm_config.endpoint:
+                llm_secrets["anthropic-foundry-api-key"] = llm_config.api_key
+                llm_secrets["azure-openai-endpoint"] = llm_config.endpoint
+            elif llm_config.provider == "anthropic" and llm_config.api_key:
+                llm_secrets["anthropic-api-key"] = llm_config.api_key
+
+            if llm_secrets:
+                with con.spin("Storing LLM credentials in Key Vault..."):
+                    for secret_name, secret_value in llm_secrets.items():
+                        result = subprocess.run(
+                            [
+                                "az", "keyvault", "secret", "set",
+                                "--vault-name", kv_name,
+                                "--name", secret_name,
+                                "--value", secret_value,
+                            ],
+                            capture_output=True, text=True, check=False,
+                        )
+                        if result.returncode != 0:
+                            con.warn(f"Failed to set secret '{secret_name}': {result.stderr.strip()}")
+                        else:
+                            con.success(f"Key Vault: {secret_name}")
+        except Exception as exc:
+            con.warn(f"Could not store LLM credentials in Key Vault: {exc}")
+            provision_warnings.append(f"LLM Key Vault: {exc}")
 
     # Bicep deployment
     infra_dir = cfg._find_infra_dir()
@@ -395,7 +636,15 @@ async def _run_up(
         "vmSku": vm_sku,
         "adminSshPublicKey": ssh_pub_key,
         "environment": environment,
+        "useEntraIdLogin": auth_method == "entra-id",
+        "allowedSshSourceIP": allowed_ssh_source_ip,
+        "enableAutoStart": enable_auto_start,
     }
+    if enable_auto_start:
+        deploy_params["autoStartTime"] = auto_start_time
+    if auth_method == "entra-id":
+        deploy_params["entraLoginTenantId"] = tenant_id
+        deploy_params["entraLoginPrincipalId"] = dev_principal_id
     if kv_resource_id:
         deploy_params["keyVaultResourceId"] = kv_resource_id
 
@@ -477,6 +726,7 @@ async def _run_up(
                     console=con.console,
                     keyvault_name=kv_name,
                     filter_names=selected_projects,
+                    llm_config=llm_config,
                 )
                 if fail_count > 0:
                     provision_warnings.append("Some projects had issues")
@@ -493,16 +743,51 @@ async def _run_up(
     con.step(5, TOTAL_STEPS, "Handoff")
 
     # SSH config
-    from board.ssh.config_file import build_ssh_key_config_block, write_managed_block
+    from board.ssh.config_file import write_managed_block
 
     ssh_config_path = Path.home() / ".ssh" / "config"
-    block = build_ssh_key_config_block(
-        alias=deploy_cfg.ssh_host_alias,
-        hostname=deploy_cfg.hostname,
-        key_path=str(key_path),
-    )
+
+    if auth_method == "entra-id":
+        from board.ssh.config_file import build_entra_id_config_block
+
+        block = build_entra_id_config_block(
+            alias=deploy_cfg.ssh_host_alias,
+            hostname=deploy_cfg.hostname,
+        )
+    else:
+        from board.ssh.config_file import build_ssh_key_config_block
+
+        block = build_ssh_key_config_block(
+            alias=deploy_cfg.ssh_host_alias,
+            hostname=deploy_cfg.hostname,
+            key_path=str(key_path),
+        )
+
     write_managed_block(ssh_config_path, deploy_cfg.ssh_host_alias, block)
-    con.success("SSH config ready")
+
+    if auth_method == "entra-id":
+        from board.ssh.config_file import refresh_entra_certs
+
+        with con.spin("Generating Entra ID certificates..."):
+            cert_ok, entra_user = refresh_entra_certs(
+                deploy_cfg.ssh_host_alias,
+                deploy_cfg.resource_group,
+                deploy_cfg.vm_name,
+            )
+        if cert_ok:
+            # Re-write SSH config with the Entra user from the cert
+            if entra_user:
+                block = build_entra_id_config_block(
+                    alias=deploy_cfg.ssh_host_alias,
+                    hostname=deploy_cfg.hostname,
+                    user=entra_user,
+                )
+                write_managed_block(ssh_config_path, deploy_cfg.ssh_host_alias, block)
+            con.success("SSH config ready (Entra ID certificates generated)")
+        else:
+            con.warn("SSH config ready (certificate generation failed — run 'az login' and retry)")
+    else:
+        con.success("SSH config ready")
 
     # Timing
     total_elapsed = time.monotonic() - phase_start
@@ -510,7 +795,36 @@ async def _run_up(
     total_sec = int(total_elapsed) % 60
 
     # Completion box
-    if is_self:
+    if auth_method == "entra-id":
+        if is_self:
+            con.completion_box(
+                f"{dev_name}'s board is ready",
+                [
+                    f"Connect:  ssh {deploy_cfg.ssh_host_alias}",
+                    f"VS Code:  Remote-SSH > {deploy_cfg.ssh_host_alias}",
+                    "",
+                    "Prerequisite: az login",
+                    "Auth: Entra ID (tenant-locked)",
+                    "",
+                    f"Created in {total_min}m {total_sec}s",
+                ],
+            )
+        else:
+            con.completion_box(
+                f"{dev_name}'s board is ready",
+                [
+                    "Admin:",
+                    f"  board vm start {dev_name}",
+                    f"  board vm stop {dev_name}",
+                    "  board admin",
+                    "",
+                    "Prerequisite: az login",
+                    "Auth: Entra ID (tenant-locked)",
+                    "",
+                    f"Created in {total_min}m {total_sec}s",
+                ],
+            )
+    elif is_self:
         con.completion_box(
             f"{dev_name}'s board is ready",
             [
@@ -521,7 +835,7 @@ async def _run_up(
                 f"  board vm start {dev_name}",
                 f"  board vm stop {dev_name}",
                 "",
-                f"Shaped in {total_min}m {total_sec}s",
+                f"Created in {total_min}m {total_sec}s",
             ],
         )
     else:
@@ -531,9 +845,9 @@ async def _run_up(
                 "Admin:",
                 f"  board vm start {dev_name}",
                 f"  board vm stop {dev_name}",
-                "  board shape",
+                "  board admin",
                 "",
-                f"Shaped in {total_min}m {total_sec}s",
+                f"Created in {total_min}m {total_sec}s",
             ],
         )
 
@@ -543,7 +857,7 @@ async def _run_up(
     if webhook_url:
         con.webhook(
             webhook_url,
-            f"Board shaped for {dev_name} ({vm_sku} in {location}) -- {total_min}m {total_sec}s",
+            f"Board created for {dev_name} ({vm_sku} in {location}) -- {total_min}m {total_sec}s",
         )
 
     # Warnings
@@ -578,5 +892,5 @@ def up_command(
     location: str = typer.Option("", "--location", help="Azure region (e.g. australiaeast)."),
     region_short: str = typer.Option("", "--region-short", help="Short region code (e.g. aue)."),
 ) -> None:
-    """Shape a new developer board (5-phase setup wizard)."""
+    """Create a new developer board (5-phase setup wizard)."""
     asyncio.run(_run_up(dry_run, demo, non_interactive, env, location, region_short))

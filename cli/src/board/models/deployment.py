@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -88,3 +89,15 @@ class DeploymentResult:
     @property
     def all_errors(self) -> list[str]:
         return [e for p in self.phases for e in p.errors]
+
+
+@dataclass
+class LlmConfig:
+    """LLM provider configuration collected during board setup.
+
+    Supports Azure AI Foundry (API key) or direct Anthropic API.
+    """
+
+    provider: Literal["foundry", "anthropic", "none"] = "none"
+    api_key: str | None = None      # Foundry API key or direct Anthropic key
+    endpoint: str | None = None     # Foundry endpoint URL

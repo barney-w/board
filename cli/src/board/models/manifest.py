@@ -126,6 +126,26 @@ class HealthCheck(BaseModel):
     port: int | None = None
 
 
+class DevTask(BaseModel):
+    """A dev workflow command surfaced in quickstart and VS Code tasks."""
+
+    label: str
+    run: str
+
+
+class DevConfig(BaseModel):
+    """Dev workflow — interactive commands instead of systemd daemons.
+
+    When present, provisioning installs systemd unit files but does not
+    auto-start them.  The quickstart and workspace panes show these
+    interactive commands instead of systemctl/journalctl.
+    """
+
+    run: str
+    description: str = ""
+    tasks: list[DevTask] = []
+
+
 class ProjectManifest(BaseModel):
     """Complete .project.yaml schema.
 
@@ -143,6 +163,7 @@ class ProjectManifest(BaseModel):
     install: list[InstallStep] = []
     docker: DockerConfig | None = None
     post_docker: list[InstallStep] = []
+    dev: DevConfig | None = None
     services: list[Service] = []
     env: EnvConfig | None = None
     vscode: VscodeConfig | None = None

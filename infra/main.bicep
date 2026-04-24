@@ -54,7 +54,13 @@ param autoShutdownNotificationEmail string = ''
 param adminUsername string = 'devuser'
 
 @description('Whether to install Entra ID SSH login extension')
-param useEntraIdLogin bool = false
+param useEntraIdLogin bool = true
+
+@description('Tenant ID to lock AADSSHLogin extension to. Required when useEntraIdLogin is true.')
+param entraLoginTenantId string = ''
+
+@description('Entra ID object ID of the developer. Gets VM Administrator Login role. Required when useEntraIdLogin is true.')
+param entraLoginPrincipalId string = ''
 
 @description('Resource ID of Key Vault for project secrets (empty = skip)')
 param keyVaultResourceId string = ''
@@ -79,6 +85,7 @@ var commonTags = {
   environment: environment
   owner: developerName
   'managed-by': 'bicep'
+  'auth-method': useEntraIdLogin ? 'entra-id' : 'ssh-key'
   created: deploymentTimestamp
 }
 
@@ -261,6 +268,9 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.0' = {
     // Entra ID SSH Extension (work tenant only)
     extensionAadJoinConfig: {
       enabled: useEntraIdLogin
+      settings: useEntraIdLogin && !empty(entraLoginTenantId) ? {
+        tenant_id: entraLoginTenantId
+      } : {}
     }
   }
 }
@@ -289,6 +299,16 @@ module kvRole './modules/keyvault-role.bicep' = if (keyVaultResourceId != '') {
   params: {
     keyVaultName: last(split(keyVaultResourceId, '/'))
     principalId: vm.outputs.?systemAssignedMIPrincipalId ?? ''
+  }
+}
+
+// ── Module 7: Entra ID RBAC – VM Administrator Login ──
+
+module vmLoginRoles './modules/vm-login-roles.bicep' = if (useEntraIdLogin && !empty(entraLoginPrincipalId)) {
+  name: 'vm-login-roles'
+  params: {
+    vmName: vm.outputs.name
+    principalId: entraLoginPrincipalId
   }
 }
 
