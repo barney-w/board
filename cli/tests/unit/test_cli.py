@@ -30,7 +30,7 @@ class TestCommandRegistration:
         assert result.exit_code == 0
         # Top-level commands
         assert "up" in result.output
-        assert "shape" in result.output
+        assert "admin" in result.output
         assert "fleet" in result.output
         assert "init" in result.output
         assert "smoke-test" in result.output
@@ -49,8 +49,8 @@ class TestCommandRegistration:
         assert "--location" in output
         assert "--region-short" in output
 
-    def test_shape_help(self) -> None:
-        result = runner.invoke(app, ["shape", "--help"])
+    def test_admin_help(self) -> None:
+        result = runner.invoke(app, ["admin", "--help"])
         assert result.exit_code == 0
         assert "admin" in result.output.lower() or "control panel" in result.output.lower()
 

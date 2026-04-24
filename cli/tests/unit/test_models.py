@@ -17,15 +17,21 @@ class TestProjectManifest:
         assert manifest.name == "surf"
         assert manifest.description == "AI platform (Python/FastAPI + Postgres)"
         assert manifest.repo == "https://github.com/barney-w/surf"
-        assert manifest.requires.tools == ["python3", "uv", "docker"]
+        assert manifest.requires.tools == ["python3", "uv", "docker", "just"]
         assert manifest.requires.cloud_init is True
         assert len(manifest.install) == 2
         assert manifest.install[0].label == "API dependencies"
         assert manifest.docker is not None
         assert manifest.docker.compose_file == "docker-compose.yml"
-        assert len(manifest.docker.containers) == 1
+        assert len(manifest.docker.containers) == 3
         assert manifest.docker.containers[0].name == "surf-postgres"
+        assert manifest.docker.containers[1].name == "surf-langfuse-db"
+        assert manifest.docker.containers[2].name == "surf-otel-collector"
         assert len(manifest.post_docker) == 1
+        assert manifest.dev is not None
+        assert manifest.dev.run == "just dev"
+        assert manifest.dev.description == "API with hot reload"
+        assert len(manifest.dev.tasks) == 6
         assert len(manifest.services) == 1
         assert manifest.services[0].name == "surf-api"
         assert manifest.services[0].exec_ == (
@@ -36,7 +42,7 @@ class TestProjectManifest:
         assert manifest.env.hardcoded["POSTGRES_HOST"] == "localhost"
         assert manifest.env.required == ["ANTHROPIC_API_KEY"]
         assert manifest.vscode is not None
-        assert len(manifest.vscode.tasks) == 6
+        assert len(manifest.vscode.tasks) == 5
         assert len(manifest.vscode.launch) == 1
         assert len(manifest.health) == 3
 
@@ -48,6 +54,9 @@ class TestProjectManifest:
         assert manifest.requires.tools == ["node", "pnpm"]
         assert manifest.docker is None
         assert len(manifest.install) == 2
+        assert manifest.dev is not None
+        assert manifest.dev.run == "pnpm run dev"
+        assert manifest.dev.description == "Dev server with hot reload"
         assert manifest.vscode is not None
         assert len(manifest.vscode.tasks) == 4
         assert len(manifest.health) == 2

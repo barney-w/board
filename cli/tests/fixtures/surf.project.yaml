@@ -7,7 +7,7 @@ path: ~/projects/surf # default: ~/projects/<name>
 
 # ── System requirements (validated before provisioning) ──
 requires:
-  tools: [python3, uv, docker]
+  tools: [python3, uv, docker, just]
   cloud_init: true # wait for cloud-init before provisioning
 
 # ── Dependency installation (idempotent commands) ──
@@ -26,13 +26,35 @@ docker:
       health_cmd: pg_isready -U surf -d surf
       health_interval: 2
       health_timeout: 60
+    - name: surf-langfuse-db
+      restart_policy: unless-stopped
+    - name: surf-otel-collector
+      restart_policy: unless-stopped
 
 # ── Post-docker setup (runs after containers are healthy) ──
 post_docker:
   - label: Run database migrations
     run: cd api && uv run alembic upgrade head
 
-# ── Long-running app services (systemd user units) ──
+# ── Dev workflow (interactive, not systemd) ──
+dev:
+  run: just dev
+  description: API with hot reload
+  tasks:
+    - label: Frontend
+      run: just web
+    - label: DevUI (agent testing)
+      run: just devui
+    - label: Tests
+      run: just test
+    - label: Pre-push checks
+      run: just precheck
+    - label: Observability
+      run: just langfuse
+    - label: DB Shell
+      run: just db-shell
+
+# ── Systemd fallback (generated but not auto-started when dev is present) ──
 services:
   - name: surf-api
     description: Surf API server
@@ -68,6 +90,7 @@ env:
     AUTH_ENABLED: "false"
     ANTHROPIC_MODEL_ID: claude-haiku-4-5-20251001
     ANTHROPIC_DOMAIN_MODEL_ID: claude-sonnet-4-6
+    POSTGRES_SSL: "false"
 
   # Secrets that are critical — provisioning warns loudly if missing
   required:
@@ -77,13 +100,16 @@ env:
 vscode:
   ports:
     "8090": { label: "Surf API", auto_forward: notify }
+    "3000": { label: "Surf Web", auto_forward: notify }
+    "3100": { label: "Langfuse", auto_forward: silent }
     "5432": { label: "Postgres", auto_forward: silent }
 
   tasks:
-    - label: Restart API
-      command: systemctl --user restart surf-api && echo '✓ API restarted'
-    - label: View API Logs
-      command: journalctl --user -u surf-api -f --no-hostname -o cat
+    - label: Dev Server
+      command: just dev
+      background: true
+    - label: Frontend
+      command: just web
       background: true
     - label: Run Migrations
       command: cd ${workspaceFolder}/api && uv run alembic upgrade head
@@ -91,8 +117,6 @@ vscode:
       command: check
     - label: Postgres Shell
       command: docker exec -it surf-postgres psql -U surf -d surf
-    - label: Stop API Service
-      command: systemctl --user stop surf-api && echo '✓ API stopped (port 8090 free for debugger)'
 
   launch:
     - name: Debug Surf API
@@ -102,7 +126,6 @@ vscode:
       args: ["src.main:app", "--host", "0.0.0.0", "--port", "8090", "--reload"]
       cwd: api
       env_file: .env
-      pre_launch_task: Stop API Service
 
   settings:
     python.defaultInterpreterPath: ./api/.venv/bin/python
@@ -111,7 +134,7 @@ vscode:
 workspace:
   services:
     - name: Surf API
-      command: journalctl --user -u surf-api -f --no-hostname -o cat
+      command: just dev
     - name: Docker
       command: docker compose logs -f
 

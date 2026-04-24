@@ -174,8 +174,12 @@ board/
 │       └── welcome.ts         First-time onboarding panel
 ├── infra/            Azure infrastructure
 │   ├── main.bicep            VM + VNet + NSG + auto-shutdown
-│   ├── modules/              Auto-shutdown schedule, Key Vault RBAC
-│   └── cloud-init/           First-boot provisioning (725 lines)
+│   ├── modules/
+│   │   ├── auto-shutdown.bicep   DevTestLab daily shutdown schedule
+│   │   ├── keyvault-role.bicep   Key Vault Secrets User RBAC
+│   │   ├── vm-login-roles.bicep  VM Administrator Login RBAC (Entra ID)
+│   │   └── auto-start.bicep      Logic App weekday auto-start schedule
+│   └── cloud-init/           First-boot provisioning
 ├── projects/         Project manifests
 │   ├── surf.project.yaml         Production: FastAPI + Postgres
 │   ├── surf-kit.project.yaml     Production: React component library
@@ -234,8 +238,9 @@ just export-pass jbloggs
 | Layer | Mechanism | Detail |
 |---|---|---|
 | **VM access** | SSH-only | NSG blocks all inbound except SSH (port 22). No service ports exposed |
-| **SSH hardening** | sshd_config | `PermitRootLogin no`, `PasswordAuthentication no`, `X11Forwarding no`, `MaxAuthTries 3` |
-| **SSH keys** | ed25519 | Generated per-developer, never reused. Stored at `~/.ssh/devvm-{name}` |
+| **SSH hardening** | sshd_config | `PermitRootLogin no`, `PasswordAuthentication no`, `X11Forwarding no`, `MaxAuthTries 6` (raised from 3 for Entra ID `az ssh` agent key negotiation) |
+| **Entra ID SSH** | AADSSHLogin VM extension | Default auth method. Short-lived certificates (~1 hour), tenant-locked, RBAC-scoped. No persistent keys |
+| **SSH keys** | ed25519 | Alternative auth. Generated per-developer, never reused. Stored at `~/.ssh/devvm-{name}` |
 | **Credential transport** | AES-256-GCM | Board passes encrypted with PBKDF2-SHA256 (100,000 iterations), 16-byte salt, 12-byte IV |
 | **Two-channel delivery** | Split knowledge | ZIP file delivered by one channel (email/file share), passphrase by another (in person/SMS) |
 | **Secrets management** | Azure Key Vault | Secrets fetched at provisioning time via managed identity. RBAC-controlled (Key Vault Secrets User role) |
@@ -273,7 +278,7 @@ board/
 ├── CONTRIBUTING.md             Dev setup, code style, submission guide
 ├── LICENSE                     Apache License 2.0
 ├── README.md                   Project homepage with demos and quick start
-├── justfile                    50+ recipes (board, shape, fleet, vm ops, testing, linting)
+├── justfile                    50+ recipes (board, admin, fleet, vm ops, testing, linting)
 ├── cli/                        Python CLI package
 │   ├── pyproject.toml          Hatchling build, uv managed, Python 3.12+
 │   ├── README.md               CLI-specific docs
@@ -352,7 +357,7 @@ board/
 
 ```
 board up                Interactive 5-phase wizard — provisions a VM in ~11 min
-board shape             Admin control panel (fleet status, manage boards, secrets)
+board admin             Admin control panel (fleet status, manage boards, secrets)
 board fleet             Fleet dashboard with metrics for all boards
 board init [PATH]       Detect project stack, generate .project.yaml manifest
 board smoke-test NAME   Run health checks on a deployed board
@@ -366,8 +371,8 @@ board vm status NAME    Show detailed VM status
 board vm delete NAME    Delete a VM and associated resources
 board vm keygen NAME    Generate SSH keypair for a VM
 
-board ssh-config show NAME    Print SSH config block
-board ssh-config write NAME   Write to ~/.ssh/config (idempotent)
+board ssh-config show NAME    Print SSH config block (auto-detects auth method)
+board ssh-config write NAME   Write to ~/.ssh/config (idempotent, auto-detects)
 board ssh-config remove NAME  Remove managed block
 
 board create-rg               Create resource group
@@ -381,6 +386,10 @@ board install-projects NAME   Provision projects on a board
 board project-status NAME     Check project service health
 board wait-ready NAME         Wait for cloud-init to complete
 board rotate-key NAME         Rotate SSH key atomically
+
+board vm grant-access EMAIL NAME  Grant Entra ID access (--role admin/developer/viewer)
+board costs                       Show cost breakdown by developer
+board policies show               Show policy enforcement rules
 ```
 
 **Global flags:**
@@ -602,7 +611,9 @@ Host devvm-jbloggs
 - `read_managed_block(config_path, alias)` — read existing block
 - `write_managed_block(config_path, alias, block)` — insert/replace (idempotent)
 - `remove_managed_block(config_path, alias)` — delete block
-- `build_ssh_key_config_block(alias, hostname, key_path, username)` — generate Host stanza
+- `build_ssh_key_config_block(alias, hostname, key_path, username)` — generate Host stanza for SSH key auth
+- `build_entra_id_config_block(alias, hostname)` — generate Host stanza for Entra ID auth (certificate-based, with LocalForward for code-server, Cockpit, Portainer)
+- `refresh_entra_certs(alias, resource_group, vm_name) → (success, entra_user)` — generate/refresh short-lived Entra ID certificates via `az ssh config`; returns the Entra UPN from the generated config
 
 ### 4.9 Bundle (Encryption and Packaging)
 
@@ -624,7 +635,7 @@ Host devvm-jbloggs
 **Cross-language compatibility:** byte-identical output with `extension/src/bundle.ts`. Tested in CI.
 
 #### payload.py — Bundle Payload Assembly
-- `build_payload(developer_name, environment, region, ..., ttl_days=30) → BundlePayload`
+- `build_payload(developer_name, environment, region, ..., ttl_days=730) → BundlePayload`
 - Sets `issued_at` (UTC now) and `valid_until` (now + ttl_days) as ISO-8601
 
 #### package.py — ZIP Assembly
@@ -662,7 +673,7 @@ Accepts a manifest and SSH runner (protocol for dependency injection), executes 
 | 8 | **Workspace** | Generate `.vscode/{tasks,launch,settings}.json` |
 | 9 | **Health** | Run health checks, install TTFC (time-to-first-commit) hook |
 
-**TTFC Hook:** A one-time `pre-push` git hook that measures elapsed time from provisioning (`shaped_at`) to first push (`first_push_at`). Stores `metrics.json` with `time_to_first_commit_minutes`. Self-removes after first execution.
+**TTFC Hook:** A one-time `pre-push` git hook that measures elapsed time from provisioning (`created_at`) to first push (`first_push_at`). Stores `metrics.json` with `time_to_first_commit_minutes`. Self-removes after first execution.
 
 Each phase returns a `PhaseResult` with timing, warnings, and errors. The engine is testable via protocol-based SSH injection (fake SSH runners in tests).
 
@@ -753,7 +764,7 @@ The main entry point for creating a new board.
 **Phase 3 — Review:**
 - Summary box: resource group, VM name, projects, Key Vault, estimated cost
 
-**Phase 4 — Shape (Deployment):**
+**Phase 4 — Provision (Deployment):**
 - Create resource group
 - Create Key Vault (if selected)
 - Compile Bicep template
@@ -770,7 +781,7 @@ The main entry point for creating a new board.
 
 **Flags:** `--dry-run` (validate only), `--demo` (mock Azure calls), `--non-interactive` (env var driven)
 
-#### `board shape` — Admin Control Panel (`admin.py`)
+#### `board admin` — Admin Control Panel (`admin.py`)
 
 Interactive menu for day-2 operations:
 
@@ -819,7 +830,7 @@ SSH-based health verification:
 
 **Tool checks:** git, python3, uv, node, npm, docker, docker compose, az, just, nvim, gh, jq, pnpm, yq
 
-**SSHD settings verified:** `PermitRootLogin=no`, `PasswordAuthentication=no`, `X11Forwarding=no`, `MaxAuthTries=3`
+**SSHD settings verified:** `PermitRootLogin=no`, `PasswordAuthentication=no`, `X11Forwarding=no`, `MaxAuthTries=6`
 
 **Cloud-init artefacts:** setup-me.sh, .board/config, /home/devuser ownership, systemd timer
 
@@ -876,6 +887,9 @@ SSH-based health verification:
 | `board.openTerminal` | Open Terminal | SSH terminal to VM |
 | `board.openCodeServer` | Open code-server | SSH tunnel to code-server |
 | `board.openWorkspace` | Open Workspace Terminals | Terminal + Copilot split layout |
+| `board.showPass` | Show Pass | Display the Board Pass card for the current configuration |
+| `board.openCockpit` | Open Cockpit | SSH tunnel to Cockpit system admin UI (localhost:9091) |
+| `board.openPortainer` | Open Portainer | SSH tunnel to Portainer Docker management (localhost:9444) |
 | `board.cheatsheet` | Cheatsheet | Full quick-reference webview |
 
 ### 5.4 Board Pass Card UI
@@ -896,15 +910,16 @@ SSH-based health verification:
 
 ### 5.5 Connection Workflow
 
-`connection.ts` implements a 7-step connection sequence:
+`connection.ts` implements a multi-step connection sequence that branches on auth method:
 
 1. **Configuration check** — ensure developer name is set
 2. **SSH config** — write/update `~/.ssh/config` (idempotent)
-3. **SSH key verification** (ssh-key auth) — check file exists, restore from SecretStorage if missing, prompt import if not found
-4. **Azure CLI verification** (entra-id auth) — check `az` CLI, install `ssh` extension if missing
-5. **VM state check** (if Azure CLI available) — check power state, auto-start if stopped, wait up to 2 minutes for "running"
-6. **Remote-SSH extension** — check installed, install if missing, add Board to default extensions
-7. **Open remote window** — `vscode.openFolder()` with `vscode-remote://ssh-remote+devvm-{name}/home/devuser/projects`
+3. **Auth-specific verification:**
+   - **SSH key path** (ssh-key auth) — check file exists, restore from SecretStorage if missing, prompt import if not found
+   - **Entra ID path** (entra-id auth) — verify Azure CLI installed, check/install `az ssh` extension, refresh short-lived certificates via `az ssh config`, re-write SSH config with Entra username from cert
+4. **VM state check** (if Azure CLI available) — check power state, auto-start if stopped, wait up to 2 minutes for "running"
+5. **Remote-SSH extension** — check installed, install if missing
+6. **Open remote window** — `vscode.openFolder()` with `vscode-remote://ssh-remote+devvm-{name}/home/devuser/projects`
 
 **VM state handling:**
 - `running` → proceed immediately
@@ -976,6 +991,12 @@ Three sidebar tree-view providers under the Board activity bar icon:
 | `shutdownTime` | string | `1900` | Auto-shutdown (local time) |
 | `shutdownEmail` | string | `""` | Notification email |
 | `keyVaultName` | string | `""` | Optional Key Vault name |
+| `useEntraIdLogin` | bool | `true` | Enable Entra ID (AAD) SSH authentication |
+| `entraLoginTenantId` | string | `""` | Tenant ID for AADSSHLogin extension |
+| `entraLoginPrincipalId` | string | `""` | Principal ID for VM Login RBAC role |
+| `enableAutoStart` | bool | `false` | Enable weekday auto-start schedule |
+| `autoStartTime` | string | `"0800"` | Auto-start time (24h format) |
+| `autoStartTimezone` | string | `"AUS Eastern Standard Time"` | Timezone for auto-start |
 
 **Resources created:**
 - **NSG** — deny-all inbound baseline, allow SSH from `allowedSshSource`, conditional HTTPS
@@ -990,6 +1011,10 @@ Three sidebar tree-view providers under the Board activity bar icon:
 **`infra/modules/auto-shutdown.bicep`** — creates `Microsoft.DevTestLab/schedules` resource for daily VM shutdown with optional email notification.
 
 **`infra/modules/keyvault-role.bicep`** — assigns "Key Vault Secrets User" role (GUID: `4633458b-17de-408a-b874-0445c86b69e6`) to the VM's system-assigned managed identity.
+
+**`infra/modules/vm-login-roles.bicep`** — assigns "Virtual Machine Administrator Login" role (GUID: `1c0163c0-47e6-4577-8991-ea5c82e286e4`) to a specified Entra ID principal, scoped to the VM. Used for Entra ID SSH authentication.
+
+**`infra/modules/auto-start.bicep`** — Logic App-based weekday auto-start schedule. Creates a weekly recurrence trigger, grants "Virtual Machine Contributor" to the Logic App's managed identity, and calls the VM start API.
 
 **`infra/bicepconfig.json`** — analyser rules: error on unused params/vars, no hardcoded URLs, no secrets in outputs; warning on literal admin usernames, old API versions.
 
@@ -1025,7 +1050,7 @@ Three sidebar tree-view providers under the Board activity bar icon:
 PermitRootLogin no
 PasswordAuthentication no
 X11Forwarding no
-MaxAuthTries 3
+MaxAuthTries 6
 ClientAliveInterval 300
 ClientAliveCountMax 2
 ```
@@ -1247,24 +1272,30 @@ default_region   = "aue"
 
 | Category | Recipes |
 |---|---|
-| **Interactive Setup** | `board`, `demo`, `shape` |
+| **Interactive Setup** | `board`, `demo`, `admin` |
 | **Deployment** | `create-vm`, `create-rg`, `validate`, `what-if` |
-| **VM Operations** | `start`, `stop`, `ssh`, `ssh-entra`, `status`, `list` |
+| **VM Operations** | `start`, `stop`, `ssh`, `status`, `list` |
+| **Access Control** | `grant-access` (admin/developer/viewer roles) |
 | **Teardown** | `delete-vm`, `destroy-all` |
+| **SSH Config** | `ssh-config`, `ssh-config-write`, `ssh-config-remove` (all auto-detect auth method) |
+| **Board Passes** | `export-pass`, `export-ssh-pass` |
 | **Utilities** | `generate-key`, `smoke-test`, `cloud-init-status` |
-| **Developer Experience** | `ssh-config`, `ssh-config-entra`, `setup-me`, `code-server`, `tunnel-setup`, `tunnel-web`, `browser-ide`, `export-pass` |
+| **Browser Tools** | `cockpit`, `portainer`, `code-server` (auth-aware SSH tunnels) |
+| **VS Code Tunnel** | `tunnel-setup`, `tunnel-web`, `browser-ide` |
+| **Governance** | `policies`, `costs`, `costs-dev` |
 | **Project Operations** | `install-projects`, `project-status`, `fleet-status`, `init` |
-| **Automation** | `ssh-config-write`, `ssh-config-remove`, `wait-ready`, `preflight`, `provision`, `rotate-key` |
+| **Automation** | `wait-ready`, `preflight`, `provision`, `rotate-key`, `build-extension` |
 | **Static Analysis** | `lint-python`, `format-python`, `lint-bicep`, `lint-cloud-init`, `lint-manifests`, `check` |
 | **Testing** | `test`, `test-cov`, `dry-run`, `test-cloud-init` |
-| **Build** | `build-extension` |
-| **Access Control** | `grant-ssh-access` |
 
 **Notable recipes:**
 
 - `just board` — runs the full interactive wizard
-- `just shape` — admin control panel
+- `just admin` — admin control panel
 - `just export-pass jbloggs` — creates encrypted starter kit
+- `just grant-access jbloggs jane@contoso.com role=admin` — grant Entra ID access with role
+- `just costs` — cost breakdown by developer
+- `just policies` — show policy enforcement rules
 - `just provision name` — non-interactive full provision (`BOARD_NON_INTERACTIVE=1`)
 - `just test-cloud-init` — launches Ubuntu 24.04 in Multipass, applies cloud-init, verifies tools
 - `just dry-run testuser` — validates setup inputs without Azure calls
@@ -1327,7 +1358,7 @@ docs/site/src/content/
 │   ├── getting-started/
 │   │   ├── quickstart.md        Prerequisites, provision, export pass, developer connects
 │   │   ├── for-developers.md    Connect, first-time setup, daily workflow, auto-shutdown
-│   │   └── for-shapers.md       Provision boards, admin menu, fleet operations, manifests
+│   │   └── for-admins.md        Provision boards, admin menu, fleet operations, manifests
 │   └── reference/
 │       ├── architecture.md      4-layer stack, 9-phase pipeline, security model
 │       └── manifest-schema.md   Complete YAML schema with examples
@@ -1360,7 +1391,7 @@ docs/site/src/content/
 | `test_ui.py` | Console + prompts | Rich output, non-interactive mode, prompt fallbacks |
 
 **Integration tests:**
-- `test_shape_e2e.py` — end-to-end provisioning flow
+- `test_shape_e2e.py` — end-to-end provisioning flow (file retains legacy name)
 - `test_crypto_compat.py` — cross-language crypto compatibility (Python ↔ TypeScript)
 
 **Fixtures:** `conftest.py` with mocked Azure credentials, SDK clients, SSH sessions.
@@ -1469,7 +1500,7 @@ The 5-phase interactive wizard:
 1. **Configure** — developer name, environment, projects, Key Vault, SSH key, VM size
 2. **Authenticate** — resolve Azure subscription
 3. **Review** — summary with estimated cost
-4. **Shape** — Bicep deploy, cloud-init wait (~8 min), project provisioning
+4. **Provision** — Bicep deploy, cloud-init wait (~8 min), project provisioning
 5. **Handoff** — SSH config, connection instructions, optional board pass
 
 Total time: ~11 minutes for a fresh board.
@@ -1506,13 +1537,13 @@ Share the ZIP by email/file transfer. Share the passphrase by a separate channel
 ### 14.4 Admin: Fleet Management
 
 ```bash
-just shape                # Interactive admin menu
+just admin                # Interactive admin menu
 just fleet-status         # Fleet dashboard with metrics
 just list                 # List all VMs
 just smoke-test jbloggs   # Health checks on a specific board
 ```
 
-The admin menu (`board shape`) provides:
+The admin menu (`board admin`) provides:
 - Fleet overview with running/stopped status
 - Start/stop/SSH/delete individual VMs
 - Project provisioning on existing VMs

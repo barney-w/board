@@ -41,16 +41,21 @@ describe('buildSshKeyConfigBlock', () => {
 });
 
 describe('buildEntraIdConfigBlock', () => {
-  it('produces config with ProxyCommand and no IdentityFile', () => {
+  it('produces config with CertificateFile and IdentityFile', () => {
     const block = buildEntraIdConfigBlock(makeConfig({ authMethod: 'entra-id' }));
-    expect(block).toContain('ProxyCommand az ssh proxy');
-    expect(block).not.toContain('IdentityFile');
+    expect(block).toContain('CertificateFile ~/.ssh/board-entra/devvm-jbloggs/id_rsa.pub-aadcert.pub');
+    expect(block).toContain('IdentityFile ~/.ssh/board-entra/devvm-jbloggs/id_rsa');
+    expect(block).not.toContain('ProxyCommand');
   });
 
-  it('includes resource group and vm name in ProxyCommand', () => {
+  it('includes User when entraUser is provided', () => {
+    const block = buildEntraIdConfigBlock(makeConfig(), 'user@tenant.onmicrosoft.com');
+    expect(block).toContain('User user@tenant.onmicrosoft.com');
+  });
+
+  it('omits User when entraUser is not provided', () => {
     const block = buildEntraIdConfigBlock(makeConfig());
-    expect(block).toContain('--resource-group rg-personal-aue-devvm');
-    expect(block).toContain('--vm-name vm-personal-aue-devvm-jbloggs');
+    expect(block).not.toContain('User ');
   });
 });
 
