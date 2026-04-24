@@ -21,9 +21,9 @@ board *args="":
 demo:
     @{{_board}} up --demo
 
-# Shape — shaper's control panel (manage boards, projects, and secrets)
-shape:
-    @{{_board}} shape
+# Admin — control panel (manage boards, projects, and secrets)
+admin:
+    @{{_board}} admin
 
 # ── Deployment ──
 
@@ -53,15 +53,9 @@ start name env=default_env:
 stop name env=default_env:
     @{{_board}} vm stop {{name}} --env {{env}}
 
-# SSH into a board
+# SSH into a board (auto-detects auth method: Entra ID or SSH key)
 ssh name:
     @{{_board}} vm ssh {{name}}
-
-# SSH via Entra ID (work tenant)
-ssh-entra name env=default_env:
-    az ssh vm \
-        --resource-group rg-{{env}}-{{default_region}}-devvm \
-        --name vm-{{env}}-{{default_region}}-devvm-{{name}}
 
 # Show board status
 status name env=default_env:
@@ -70,6 +64,12 @@ status name env=default_env:
 # List all boards and their status
 list env=default_env:
     @{{_board}} vm ls --env {{env}}
+
+# ── Access Control ──
+
+# Grant access to a developer (role: admin, developer, or viewer)
+grant-access name email env=default_env role="developer":
+    @{{_board}} vm grant-access {{email}} {{name}} --env {{env}} --role {{role}}
 
 # ── Teardown ──
 
@@ -93,6 +93,30 @@ destroy-all env=default_env confirm="":
         {{_board}} destroy --env {{env}} --region-short {{default_region}}
     fi
 
+# ── SSH Config ──
+
+# Print SSH config block for a developer (auto-detects auth method)
+ssh-config name env=default_env:
+    @{{_board}} ssh-config show {{name}} --env {{env}}
+
+# Write SSH config block to ~/.ssh/config (idempotent, auto-detects auth method)
+ssh-config-write name env=default_env:
+    @{{_board}} ssh-config write {{name}} --env {{env}}
+
+# Remove SSH config block for a board
+ssh-config-remove name:
+    @{{_board}} ssh-config remove {{name}}
+
+# ── Board Passes ──
+
+# Create a board pass (encrypted starter kit) for a developer
+export-pass name env=default_env:
+    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}}
+
+# Create a board pass forcing SSH key auth (regardless of VM tag)
+export-ssh-pass name env=default_env:
+    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}} --auth ssh-key
+
 # ── Utilities ──
 
 # Generate an SSH keypair for a dev
@@ -104,74 +128,124 @@ smoke-test name:
     @{{_board}} smoke-test {{name}}
 
 # Check cloud-init status on a board
-cloud-init-status name:
-    ssh -i ~/.ssh/devvm-{{name}} -o StrictHostKeyChecking=accept-new \
-        devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com \
-        'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
-
-# ── Developer Experience ──
-
-# Print SSH config block for a developer's local machine
-ssh-config name:
-    @{{_board}} ssh-config show {{name}}
-
-# Generate SSH config for Entra ID auth (work tenant)
-ssh-config-entra name env=default_env:
-    @echo "# Add this to ~/.ssh/config"
-    @echo ""
-    @echo "Host devvm-{{name}}"
-    @echo "    HostName devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
-    @echo "    ProxyCommand az ssh proxy --resource-group rg-{{env}}-{{default_region}}-devvm --vm-name vm-{{env}}-{{default_region}}-devvm-{{name}} --port %p"
-    @echo "    ForwardAgent yes"
-    @echo "    ServerAliveInterval 60"
-    @echo "    ServerAliveCountMax 3"
-    @echo "    LocalForward 8080 127.0.0.1:8080"
-    @echo "    LocalForward 9091 127.0.0.1:9190"
-    @echo "    LocalForward 9444 127.0.0.1:9443"
-    @echo ""
-    @echo "# Usage:  ssh devvm-{{name}}"
-
-# First-time setup wizard (run on the board after first SSH login)
-setup-me name:
-    ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com 'bash ~/setup-me.sh'
-
-# Access Cockpit system admin UI via SSH tunnel (localhost:9091 → VM:9190)
-cockpit name:
-    @echo "Opening SSH tunnel to Cockpit..."
-    @echo "Open http://localhost:9091 in your browser."
-    @echo "Log in with devuser / board."
-    @echo ""
-    @echo "Press Ctrl+C to close the tunnel."
-    ssh -L 9091:localhost:9190 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
-
-# Access Portainer Docker management UI via SSH tunnel (localhost:9444 → VM:9443)
-portainer name:
-    @echo "Opening SSH tunnel to Portainer..."
-    @echo "Open https://localhost:9444 in your browser."
-    @echo "Accept the self-signed certificate warning. Default admin password: boardboard12"
-    @echo ""
-    @echo "Press Ctrl+C to close the tunnel."
-    ssh -L 9444:localhost:9443 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
-
-# Access code-server via SSH tunnel (opens browser IDE at localhost:8080)
-code-server name:
-    @echo "Opening SSH tunnel to code-server..."
-    @echo "Open http://localhost:8080 in your browser."
-    @PASS=$(ssh -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com \
-        'cat ~/.board/code-server-password 2>/dev/null || echo "unknown"') && \
-        echo "Password: $PASS"
-    @echo ""
-    @echo "Press Ctrl+C to close the tunnel."
-    ssh -L 8080:localhost:8080 -N -i ~/.ssh/devvm-{{name}} devuser@devvm-{{name}}.{{default_location}}.cloudapp.azure.com
-
-# Forward all listening ports from a VM to localhost (dynamic discovery)
-tunnel-all name:
+cloud-init-status name env=default_env:
     #!/usr/bin/env bash
     set -euo pipefail
-    KEY=~/.ssh/devvm-{{name}}
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    # Use Entra cert-based SSH if no key file exists
+    if [ -f "$KEY" ]; then
+        ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "devuser@$HOST" \
+            'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
+    else
+        az ssh vm \
+            --resource-group "rg-{{env}}-{{default_region}}-devvm" \
+            --name "vm-{{env}}-{{default_region}}-devvm-{{name}}" \
+            -- 'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
+    fi
+
+# ── Browser Tools ──
+
+# Access Cockpit system admin UI via SSH tunnel (localhost:9091 → VM:9190)
+cockpit name env=default_env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    echo "Opening SSH tunnel to Cockpit..."
+    echo "Open http://localhost:9091 in your browser."
+    echo ""
+    echo "Press Ctrl+C to close the tunnel."
+    if [ -f "$KEY" ]; then
+        ssh -L 9091:localhost:9190 -N -i "$KEY" "devuser@$HOST"
+    else
+        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
+        if [ -f "$CERT_DIR/id_rsa" ]; then
+            ssh -L 9091:localhost:9190 -N \
+                -i "$CERT_DIR/id_rsa" \
+                -o "CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub" \
+                "$HOST"
+        else
+            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
+            echo "Run: just ssh-config-write {{name}}"
+            exit 1
+        fi
+    fi
+
+# Access Portainer Docker management UI via SSH tunnel (localhost:9444 → VM:9443)
+portainer name env=default_env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    echo "Opening SSH tunnel to Portainer..."
+    echo "Open https://localhost:9444 in your browser."
+    echo "Accept the self-signed certificate warning."
+    echo ""
+    echo "Press Ctrl+C to close the tunnel."
+    if [ -f "$KEY" ]; then
+        ssh -L 9444:localhost:9443 -N -i "$KEY" "devuser@$HOST"
+    else
+        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
+        if [ -f "$CERT_DIR/id_rsa" ]; then
+            ssh -L 9444:localhost:9443 -N \
+                -i "$CERT_DIR/id_rsa" \
+                -o "CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub" \
+                "$HOST"
+        else
+            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
+            echo "Run: just ssh-config-write {{name}}"
+            exit 1
+        fi
+    fi
+
+# Access code-server via SSH tunnel (opens browser IDE at localhost:8080)
+code-server name env=default_env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    echo "Opening SSH tunnel to code-server..."
+    echo "Open http://localhost:8080 in your browser."
+    if [ -f "$KEY" ]; then
+        SSH_CMD="ssh -i $KEY devuser@$HOST"
+    else
+        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
+        if [ -f "$CERT_DIR/id_rsa" ]; then
+            SSH_CMD="ssh -i $CERT_DIR/id_rsa -o CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub $HOST"
+        else
+            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
+            echo "Run: just ssh-config-write {{name}}"
+            exit 1
+        fi
+    fi
+    PASS=$($SSH_CMD 'cat ~/.board/code-server-password 2>/dev/null || echo "unknown"')
+    echo "Password: $PASS"
+    echo ""
+    echo "Press Ctrl+C to close the tunnel."
+    $SSH_CMD -L 8080:localhost:8080 -N
+
+# Forward all listening ports from a VM to localhost (dynamic discovery)
+tunnel-all name env=default_env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
+    KEY="$HOME/.ssh/devvm-{{name}}"
+    # Build SSH base command depending on auth method
+    if [ -f "$KEY" ]; then
+        SSH_BASE="ssh -i $KEY devuser@$HOST"
+    else
+        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
+        if [ -f "$CERT_DIR/id_rsa" ]; then
+            SSH_BASE="ssh -i $CERT_DIR/id_rsa -o CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub $HOST"
+        else
+            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
+            echo "Run: just ssh-config-write {{name}}"
+            exit 1
+        fi
+    fi
     echo "Discovering listening ports on $HOST..."
-    PORTS=$(ssh -i "$KEY" devuser@"$HOST" \
+    PORTS=$($SSH_BASE \
         "ss -tlnH 2>/dev/null | awk '{print \$4}' | grep -oP '(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|localhost):?\K\d+' | sort -un | awk '\$1 <= 32767 && \$1 != 22'")
     if [ -z "$PORTS" ]; then
         echo "No services listening on the VM."
@@ -197,28 +271,40 @@ tunnel-all name:
     fi
     echo ""
     echo "Press Ctrl+C to close all tunnels."
-    ssh $FORWARDS -N -i "$KEY" devuser@"$HOST"
+    $SSH_BASE $FORWARDS -N
+
+# ── VS Code Tunnel ──
 
 # Set up VS Code Tunnel on a board (interactive GitHub auth)
-tunnel-setup name:
+tunnel-setup name env=default_env:
     #!/usr/bin/env bash
     set -euo pipefail
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
     KEY="$HOME/.ssh/devvm-{{name}}"
+    # Build SSH base command depending on auth method
+    if [ -f "$KEY" ]; then
+        SSH_CMD="ssh -i $KEY devuser@$HOST"
+        SSH_CMD_T="ssh -t -i $KEY devuser@$HOST"
+    else
+        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
+        if [ -f "$CERT_DIR/id_rsa" ]; then
+            SSH_CMD="ssh -i $CERT_DIR/id_rsa -o CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub $HOST"
+            SSH_CMD_T="ssh -t -i $CERT_DIR/id_rsa -o CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub $HOST"
+        else
+            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
+            echo "Run: just ssh-config-write {{name}}"
+            exit 1
+        fi
+    fi
     echo "Setting up VS Code Tunnel on devvm-{{name}}..."
-    if ! ssh -i "$KEY" -o ConnectTimeout=5 -o BatchMode=yes "devuser@${HOST}" \
-        "test -x /usr/local/bin/code" 2>/dev/null; then
+    if ! $SSH_CMD "test -x /usr/local/bin/code" 2>/dev/null; then
         echo "ERROR: VS Code CLI not installed on devvm-{{name}}."
         exit 1
     fi
-    ssh -t -i "$KEY" "devuser@${HOST}" \
-        '/usr/local/bin/code tunnel user login --provider github'
-    ssh -i "$KEY" "devuser@${HOST}" \
-        'sudo hostnamectl set-hostname "devvm-{{name}}"' || true
-    ssh -i "$KEY" "devuser@${HOST}" \
-        '/usr/local/bin/code tunnel service uninstall 2>/dev/null; true'
-    ssh -i "$KEY" "devuser@${HOST}" \
-        '/usr/local/bin/code tunnel service install --accept-server-license-terms && echo "https://vscode.dev/tunnel/devvm-{{name}}" > ~/.board/tunnel-url'
+    $SSH_CMD_T '/usr/local/bin/code tunnel user login --provider github'
+    $SSH_CMD 'sudo hostnamectl set-hostname "devvm-{{name}}"' || true
+    $SSH_CMD '/usr/local/bin/code tunnel service uninstall 2>/dev/null; true'
+    $SSH_CMD '/usr/local/bin/code tunnel service install --accept-server-license-terms && echo "https://vscode.dev/tunnel/devvm-{{name}}" > ~/.board/tunnel-url'
     echo ""
     echo "Tunnel ready: https://vscode.dev/tunnel/devvm-{{name}}"
 
@@ -252,21 +338,19 @@ browser-ide name:
             ;;
     esac
 
-# Grant Entra ID SSH access to a developer (work tenant)
-grant-ssh-access name email env=default_env:
-    az role assignment create \
-        --assignee "{{email}}" \
-        --role "Virtual Machine Administrator Login" \
-        --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-{{env}}-{{default_region}}-devvm/providers/Microsoft.Compute/virtualMachines/vm-{{env}}-{{default_region}}-devvm-{{name}}"
-    @echo "{{name}} can now SSH via: az ssh vm --resource-group rg-{{env}}-{{default_region}}-devvm --name vm-{{env}}-{{default_region}}-devvm-{{name}}"
+# ── Governance ──
 
-# Build the VS Code extension (.vsix)
-build-extension:
-    cd extension && npm run build:prod && npx @vscode/vsce package --no-dependencies
+# Show policy enforcement rules
+policies:
+    @{{_board}} policies show
 
-# Create a starter kit (board pass + extension + setup scripts) for a developer
-export-pass name env=default_env:
-    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}}
+# Show cost breakdown for all boards
+costs env=default_env:
+    @{{_board}} costs --env {{env}}
+
+# Show cost breakdown for a specific developer
+costs-dev name env=default_env:
+    @{{_board}} costs --env {{env}} --developer {{name}}
 
 # ── Project Operations ──
 
@@ -294,14 +378,6 @@ init:
 
 # ── Automation ──
 
-# Write SSH config block directly to ~/.ssh/config (idempotent, managed markers)
-ssh-config-write name:
-    @{{_board}} ssh-config write {{name}}
-
-# Remove SSH config block for a board
-ssh-config-remove name:
-    @{{_board}} ssh-config remove {{name}}
-
 # Wait for cloud-init to complete on a board (polls with progress)
 wait-ready name:
     @{{_board}} wait-ready {{name}}
@@ -317,6 +393,10 @@ provision name env=default_env sku=default_sku:
 # Rotate SSH key for a board (invalidates existing board passes)
 rotate-key name:
     @{{_board}} rotate-key {{name}}
+
+# Build the VS Code extension (.vsix)
+build-extension:
+    cd extension && npm run build:prod && npx @vscode/vsce package --no-dependencies
 
 # ── Static Analysis ──
 
@@ -407,6 +487,6 @@ help:
 
 # ── Backward Compatibility Aliases ──
 alias setup := board
-alias admin := shape
+alias shape := admin
 alias export-bundle := export-pass
 alias provision-projects := install-projects

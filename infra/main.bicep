@@ -29,8 +29,8 @@ param osDiskSku string = 'StandardSSD_LRS'
 @description('SSH public key for the admin user')
 param adminSshPublicKey string
 
-@description('Source IP address or CIDR allowed to SSH (use * for any)')
-param allowedSshSourceIP string = '*'
+@description('Source IP address or CIDR allowed to SSH. Must be specified explicitly.')
+param allowedSshSourceIP string
 
 @description('Whether to attach a public IP to the VM')
 param enablePublicIp bool = true
@@ -49,6 +49,24 @@ param enableAutoShutdownNotification bool = false
 
 @description('Email address for shutdown notification')
 param autoShutdownNotificationEmail string = ''
+
+@description('Whether to enable auto-start schedule (weekdays only)')
+param enableAutoStart bool = false
+
+@description('Auto-start time in HHmm format (local timezone)')
+param autoStartTime string = '0800'
+
+@description('Timezone for auto-start schedule')
+param autoStartTimezone string = 'AUS Eastern Standard Time'
+
+@description('Days of the week to auto-start the VM')
+param autoStartDays array = [
+  'Monday'
+  'Tuesday'
+  'Wednesday'
+  'Thursday'
+  'Friday'
+]
 
 @description('Linux admin username on the VM')
 param adminUsername string = 'devuser'
@@ -291,7 +309,22 @@ module autoShutdown './modules/auto-shutdown.bicep' = {
   }
 }
 
-// ── Module 6: Key Vault Secrets User role (conditional) ──
+// ── Module 6: Auto-Start (conditional, uses Logic App) ──
+
+module autoStart './modules/auto-start.bicep' = if (enableAutoStart) {
+  name: 'auto-start-deployment'
+  params: {
+    vmName: vm.outputs.name
+    vmResourceId: vm.outputs.resourceId
+    location: location
+    startTime: autoStartTime
+    timezone: autoStartTimezone
+    startDays: autoStartDays
+    tags: commonTags
+  }
+}
+
+// ── Module 7: Key Vault Secrets User role (conditional) ──
 
 module kvRole './modules/keyvault-role.bicep' = if (keyVaultResourceId != '') {
   name: 'kv-role-assignment'
@@ -302,7 +335,7 @@ module kvRole './modules/keyvault-role.bicep' = if (keyVaultResourceId != '') {
   }
 }
 
-// ── Module 7: Entra ID RBAC – VM Administrator Login ──
+// ── Module 8: Entra ID RBAC – VM Administrator Login ──
 
 module vmLoginRoles './modules/vm-login-roles.bicep' = if (useEntraIdLogin && !empty(entraLoginPrincipalId)) {
   name: 'vm-login-roles'

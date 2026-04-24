@@ -15,17 +15,22 @@ install:
   - label: Build library
     run: pnpm run build
 
+# ── Dev workflow ──
+dev:
+  run: pnpm run dev
+  description: Dev server with hot reload
+
 vscode:
   ports:
     "5173": { label: "surf-kit dev server", auto_forward: notify }
 
   tasks:
-    - label: Build
-      command: pnpm run build
-      group: build
     - label: Dev Server
       command: pnpm run dev
       background: true
+    - label: Build
+      command: pnpm run build
+      group: build
     - label: Lint
       command: pnpm run lint
     - label: Type Check
@@ -44,4 +49,4 @@ health:
   - label: Dependencies
     check: test -d node_modules
   - label: Build
-    check: test -d dist
+    check: test -d packages/core/dist
