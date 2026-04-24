@@ -84,7 +84,7 @@ class TestGenerateSystemdUnit:
 
         assert "[Unit]" in unit
         assert "Description=Surf API server" in unit
-        assert "After=default.target" in unit
+        assert "After=default.target docker.service" in unit
 
         assert "[Service]" in unit
         assert "Type=simple" in unit
@@ -128,11 +128,11 @@ class TestGenerateVscodeTasks:
         obj = json.loads(raw)
 
         assert obj["version"] == "2.0.0"
-        assert len(obj["tasks"]) == 6
+        assert len(obj["tasks"]) == 5
 
         labels = [t["label"] for t in obj["tasks"]]
-        assert "Restart API" in labels
-        assert "View API Logs" in labels
+        assert "Dev Server" in labels
+        assert "Frontend" in labels
         assert "Health Check" in labels
 
         # All tasks have type shell and problemMatcher
@@ -140,13 +140,17 @@ class TestGenerateVscodeTasks:
             assert t["type"] == "shell"
             assert t["problemMatcher"] == []
 
-        # background task
-        logs_task = next(t for t in obj["tasks"] if t["label"] == "View API Logs")
-        assert logs_task["isBackground"] is True
+        # background tasks
+        dev_task = next(t for t in obj["tasks"] if t["label"] == "Dev Server")
+        assert dev_task["isBackground"] is True
+        assert dev_task["command"] == "just dev"
+
+        frontend_task = next(t for t in obj["tasks"] if t["label"] == "Frontend")
+        assert frontend_task["isBackground"] is True
 
         # non-background task should not have isBackground
-        restart_task = next(t for t in obj["tasks"] if t["label"] == "Restart API")
-        assert "isBackground" not in restart_task
+        health_task = next(t for t in obj["tasks"] if t["label"] == "Health Check")
+        assert "isBackground" not in health_task
 
     def test_surf_kit_tasks_with_group(self, surf_kit_manifest_path: Path) -> None:
         m = load(surf_kit_manifest_path)
@@ -181,7 +185,7 @@ class TestGenerateVscodeLaunch:
         assert cfg["args"] == ["src.main:app", "--host", "0.0.0.0", "--port", "8090", "--reload"]
         assert cfg["cwd"] == "${workspaceFolder}/api"
         assert cfg["envFile"] == "${workspaceFolder}/.env"
-        assert cfg["preLaunchTask"] == "Stop API Service"
+        assert "preLaunchTask" not in cfg
 
     def test_surf_kit_no_launch(self, surf_kit_manifest_path: Path) -> None:
         m = load(surf_kit_manifest_path)
@@ -235,6 +239,10 @@ class TestGenerateWorkspace:
         assert "8090" in ports
         assert ports["8090"]["label"] == "Surf API"
         assert ports["8090"]["onAutoForward"] == "notify"
+        assert "3000" in ports
+        assert ports["3000"]["label"] == "Surf Web"
+        assert "3100" in ports
+        assert ports["3100"]["onAutoForward"] == "silent"
         assert "5432" in ports
         assert ports["5432"]["label"] == "Postgres"
         assert ports["5432"]["onAutoForward"] == "silent"
@@ -284,8 +292,13 @@ class TestGenerateCheckScript:
         script = self._generate_for_both(surf_manifest_path, surf_kit_manifest_path)
         # Surf project section
         assert "# \u2500\u2500 surf \u2500\u2500" in script
+        # Postgres — Docker container, plain check (port doesn't match a service)
         assert 'check "Postgres" "healthy"' in script
-        assert 'check "Surf API" "healthy"' in script
+        assert 'check_with_hint "Postgres"' not in script
+        # Surf API — app service, check_with_hint with dev hint
+        assert 'check_with_hint "Surf API" "healthy"' in script
+        assert "run 'just dev' to start" in script
+        # Alembic — no port, plain check
         assert 'check "Alembic migrations" "healthy"' in script
 
     def test_surf_kit_health_checks(
@@ -307,7 +320,7 @@ class TestGenerateCheckScript:
     ) -> None:
         script = self._generate_for_both(surf_manifest_path, surf_kit_manifest_path)
         assert "Board Stats" in script
-        assert "shaped_at" in script
+        assert "created_at" in script
         assert "first_push_at" in script
 
     def test_summary_section(self, surf_manifest_path: Path, surf_kit_manifest_path: Path) -> None:
@@ -341,3 +354,15 @@ class TestGenerateCheckScript:
         assert 'check "Build" "healthy"' in script
         # No env var checks for surf-kit
         assert "ANTHROPIC_API_KEY" not in script
+
+    def test_health_checks_have_cd_prefix(
+        self, surf_manifest_path: Path, surf_kit_manifest_path: Path
+    ) -> None:
+        """Health checks should cd into the project directory first."""
+        script = self._generate_for_both(surf_manifest_path, surf_kit_manifest_path)
+        # surf-kit checks should cd to project directory (~ replaced with $HOME)
+        assert 'cd \\"$HOME/projects/surf-kit\\" && test -d node_modules' in script
+        assert 'cd \\"$HOME/projects/surf-kit\\" && test -d packages/core/dist' in script
+        # surf checks should also have cd prefix
+        assert 'cd \\"$HOME/projects/surf\\" && docker exec surf-postgres' in script
+        assert 'cd \\"$HOME/projects/surf\\" && curl -sf http://localhost:8090' in script

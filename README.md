@@ -35,7 +35,7 @@ You've been given a zip file and a passphrase. Here's what happens next.
 <tr><td width="40" align="center"><strong>1</strong></td>
 <td><strong>Double-click "Setup Board"</strong> — Unzip the folder. Double-click <code>Setup Board</code> (<code>.command</code> on Mac, <code>.cmd</code> on Windows). It installs the VS Code extension and opens your board pass. That's it — no terminal, no commands.</td></tr>
 <tr><td width="40" align="center"><strong>2</strong></td>
-<td><strong>Enter your passphrase</strong> — VS Code asks for the passphrase your admin gave you. This decrypts your SSH keys and connection details — everything is configured automatically.</td></tr>
+<td><strong>Enter your passphrase</strong> — VS Code asks for the passphrase your admin gave you. This decrypts your connection details and configures everything automatically. (For Entra ID boards, ensure <a href="https://aka.ms/installazurecli">Azure CLI</a> is installed and run <code>az login</code> first.)</td></tr>
 <tr><td width="40" align="center"><strong>3</strong></td>
 <td><strong>Click Connect</strong> — Your Board Pass card appears. Click <strong>Connect Now</strong> and you're coding on your cloud VM. VS Code opens a remote window — the file explorer, terminal, and extensions all run on the VM.</td></tr>
 </table>
@@ -79,10 +79,10 @@ Once connected, VS Code is running on a full Linux VM in the cloud. Everything i
 
 ### Access methods
 
-| Method                | Client                    | Extensions                 | Auth           |
-| --------------------- | ------------------------- | -------------------------- | -------------- |
-| VS Code Desktop + SSH | VS Code + Board Extension | Full Microsoft Marketplace | SSH key  |
-| code-server           | Any modern browser        | Open VSX                   | Password |
+| Method                | Client                    | Extensions                 | Auth              |
+| --------------------- | ------------------------- | -------------------------- | ----------------- |
+| VS Code Desktop + SSH | VS Code + Board Extension | Full Microsoft Marketplace | Entra ID or SSH key |
+| code-server           | Any modern browser        | Open VSX                   | Password          |
 
 ### Commands you'll use
 
@@ -90,6 +90,9 @@ Once connected, VS Code is running on a full Linux VM in the cloud. Everything i
 check                    Verify all services are healthy
 Board: Connect           Open a remote VS Code window (Cmd+Shift+P)
 Board: Start / Stop      Power-manage your VM from VS Code
+Board: Show Pass         View your Board Pass card
+Board: Open Cockpit      System monitoring dashboard (localhost:9091)
+Board: Open Portainer    Docker management UI (localhost:9444)
 Board: Open code-server  Open code-server in your browser
 ```
 
@@ -124,13 +127,13 @@ This creates the zip file containing the VS Code extension, encrypted board pass
 ### Manage the fleet
 
 ```bash
-just shape              # Admin menu (fleet status, manage boards, secrets)
+just admin              # Admin menu (fleet status, manage boards, secrets)
 just fleet-status       # Fleet overview with metrics
 just list               # List all VMs
 just smoke-test NAME    # Run health checks on a deployed board
 ```
 
-See the [Shaper Guide](https://barney-w.github.io/board/getting-started/for-shapers/) for the full admin workflow.
+See the [Admin Guide](https://barney-w.github.io/board/getting-started/for-admins/) for the full admin workflow.
 
 <details>
 <summary>📋 <strong>Project manifests</strong> — define a project in one YAML file</summary>
@@ -244,10 +247,10 @@ health:
 </details>
 
 <details>
-<summary><code>just shape</code> — admin fleet management</summary>
+<summary><code>just admin</code> — admin fleet management</summary>
 
 ```
-  Board Shaper
+  Board Admin
   ============
 
   Fleet Status
@@ -302,7 +305,7 @@ The Board CLI (`cli/`) is a Python package that orchestrates provisioning. It re
 | **Bicep**               | Azure infrastructure — VM, networking, Key Vault, auto-shutdown      |
 | **cloud-init**          | OS-level setup — packages, Docker, dev tools, user accounts          |
 | **Provisioning engine** | Project-level setup — git clone, dependencies, Docker, services, env |
-| **Board Pass**          | Encrypted credential bundle with SSH keys and connection config      |
+| **Board Pass**          | Encrypted credential bundle with connection config (+ SSH keys for key auth) |
 | **VS Code extension**   | Import pass, connect, health check, start/stop, status bar           |
 
 Your cloud, your control. Runs in your Azure subscription. No vendor lock-in. Apache 2.0 licensed.

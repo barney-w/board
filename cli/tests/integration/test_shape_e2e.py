@@ -1,4 +1,4 @@
-"""End-to-end integration tests for the Shape step deployment pipeline.
+"""End-to-end integration tests for the provisioning deployment pipeline.
 
 Exercises the full call chain from setup.py through deployment.py/auth.py/az.py
 with mocks at the Azure SDK and subprocess boundaries. No real Azure calls.
@@ -79,7 +79,7 @@ class TestBicepParameterNames:
         secure_params = re.findall(r"@secure\(\)\s*\n\s*param\s+(\w+)\s+\w+", bicep_source)
         required = set(all_params) | set(secure_params)
 
-        setup_provides = {"developerName", "vmSku", "adminSshPublicKey", "environment"}
+        setup_provides = {"developerName", "vmSku", "adminSshPublicKey", "environment", "allowedSshSourceIP"}
         missing = required - setup_provides
         assert not missing, (
             f"Bicep requires params not provided by setup.py: {missing}. "

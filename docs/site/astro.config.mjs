@@ -21,7 +21,7 @@ export default defineConfig({
           label: 'Getting Started',
           items: [
             { label: 'Quickstart', slug: 'getting-started/quickstart' },
-            { label: 'For Shapers', slug: 'getting-started/for-shapers' },
+            { label: 'For Admins', slug: 'getting-started/for-admins' },
             { label: 'For Developers', slug: 'getting-started/for-developers' },
           ],
         },

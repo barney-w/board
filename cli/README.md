@@ -21,7 +21,7 @@ board --help
 
 ```
 board up              Interactive wizard — provisions a VM in ~11 min
-board shape           Admin control panel (fleet status, manage boards, secrets)
+board admin           Admin control panel (fleet status, manage boards, secrets)
 board fleet           Fleet dashboard with metrics for all boards
 board init [PATH]     Detect project stack, generate .project.yaml manifest
 board smoke-test NAME Run health checks on a deployed board

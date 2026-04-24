@@ -68,6 +68,23 @@ This starts a local dev server (usually at `http://localhost:4321`). Content liv
 3. Write clear commit messages using Conventional Commits.
 4. Open a pull request against `main` and fill out the PR template.
 
+## Releasing
+
+Releases are cut by pushing a version tag. The [Release workflow](.github/workflows/release.yml) takes care of the rest — it builds the VS Code extension, packages the `.vsix`, and creates a GitHub Release with auto-generated notes.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or in one step with the GitHub CLI:
+
+```bash
+gh release create v0.1.0 --title "v0.1.0" --generate-notes
+```
+
+Releases do **not** happen automatically on push or PR merge — only when a `v*` tag is pushed.
+
 ## Reporting Issues
 
 Use the GitHub issue templates for bug reports and feature requests. For questions, check the [documentation](docs/) first.
