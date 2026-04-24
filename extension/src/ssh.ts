@@ -35,24 +35,36 @@ export function buildSshKeyConfigBlock(config: BoardConfig): string {
   ].join('\n');
 }
 
-/** The SSH config block to write for Entra ID auth */
-export function buildEntraIdConfigBlock(config: BoardConfig): string {
+/**
+ * The SSH config block to write for Entra ID auth.
+ *
+ * Uses `az ssh config` to generate short-lived certificates. The generated
+ * keys + certs are stored in ~/.ssh/board-entra/<alias>/ and are valid for
+ * ~1 hour. The extension refreshes them before connecting.
+ */
+export function buildEntraIdConfigBlock(config: BoardConfig, entraUser?: string): string {
   const alias = getSshHostAlias(config);
   const hostname = getHostname(config);
-  const rg = getResourceGroup(config);
-  const vm = getVmName(config);
+  const certDir = `~/.ssh/board-entra/${alias}`;
 
-  return [
+  const lines = [
     `Host ${alias}`,
     `    HostName ${hostname}`,
-    `    ProxyCommand az ssh proxy --resource-group ${rg} --vm-name ${vm} --port %p`,
+  ];
+  if (entraUser) {
+    lines.push(`    User ${entraUser}`);
+  }
+  lines.push(
+    `    CertificateFile ${certDir}/id_rsa.pub-aadcert.pub`,
+    `    IdentityFile ${certDir}/id_rsa`,
     '    ForwardAgent yes',
     '    ServerAliveInterval 60',
     '    ServerAliveCountMax 3',
     '    LocalForward 8080 127.0.0.1:8080',
     '    LocalForward 9091 127.0.0.1:9190',
     '    LocalForward 9444 127.0.0.1:9443',
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 /** Get the path to the user's SSH config file. Cross-platform. */
@@ -109,7 +121,7 @@ export function updateManagedBlock(
  * replace it. If not, append it. Creates the file + .ssh directory if
  * they don't exist.
  */
-export async function writeSshConfig(config: BoardConfig): Promise<void> {
+export async function writeSshConfig(config: BoardConfig, entraUser?: string): Promise<void> {
   const sshDir = path.join(os.homedir(), '.ssh');
   const configPath = getSshConfigPath();
   const hostAlias = getSshHostAlias(config);
@@ -120,7 +132,7 @@ export async function writeSshConfig(config: BoardConfig): Promise<void> {
   // Build the appropriate config block
   const block =
     config.authMethod === 'entra-id'
-      ? buildEntraIdConfigBlock(config)
+      ? buildEntraIdConfigBlock(config, entraUser)
       : buildSshKeyConfigBlock(config);
 
   // Read existing content, update, and write back
@@ -159,6 +171,94 @@ export async function removeSshConfig(hostAlias: string): Promise<void> {
   const result = cleaned.length > 0 ? cleaned + '\n' : '';
 
   await fs.writeFile(configPath, result, { encoding: 'utf-8', mode: 0o600 });
+}
+
+/**
+ * Generate/refresh Entra ID SSH certificates via `az ssh config`.
+ * Certificates are short-lived (~1 hour) so this should be called
+ * before each connection attempt.
+ */
+/**
+ * Result of refreshing Entra ID certificates.
+ * Includes the Entra user (UPN) extracted from the generated SSH config.
+ */
+export interface EntraCertResult {
+  success: boolean;
+  entraUser?: string;
+}
+
+/** Resolve the full path to `az` CLI, checking common install locations */
+async function resolveAzPath(): Promise<string> {
+  // Try common locations if bare 'az' might not be on PATH
+  const candidates = [
+    'az',
+    '/opt/homebrew/bin/az',
+    '/usr/local/bin/az',
+    '/usr/bin/az',
+  ];
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate, ['version'], { timeout: 5_000 });
+      return candidate;
+    } catch { /* try next */ }
+  }
+  return 'az'; // fallback to bare name
+}
+
+export async function refreshEntraCerts(config: BoardConfig): Promise<EntraCertResult> {
+  const alias = getSshHostAlias(config);
+  const rg = getResourceGroup(config);
+  const vm = getVmName(config);
+  const certDir = path.join(os.homedir(), '.ssh', 'board-entra', alias);
+
+  // Ensure cert directory exists
+  await fs.mkdir(certDir, { recursive: true, mode: 0o700 });
+
+  // Generate a temporary config to get the cert files
+  const tmpConfig = path.join(certDir, 'ssh_config');
+  const azPath = await resolveAzPath();
+
+  try {
+    // Remove old key files to avoid interactive "Overwrite?" prompt from az
+    for (const f of ['id_rsa', 'id_rsa.pub', 'id_rsa.pub-aadcert.pub']) {
+      try { await fs.unlink(path.join(certDir, f)); } catch { /* ignore */ }
+    }
+
+    const { stderr } = await execFileAsync(azPath, [
+      'ssh', 'config',
+      '-f', tmpConfig,
+      '--resource-group', rg,
+      '--name', vm,
+      '--keys-dest-folder', certDir,
+      '--overwrite',
+    ], {
+      timeout: 30_000,
+      env: { ...process.env, PATH: `${process.env.PATH || ''}:/opt/homebrew/bin:/usr/local/bin` },
+    });
+
+    // Log any warnings from az (e.g. extension not installed)
+    if (stderr) {
+      console.log('[Board] az ssh config stderr:', stderr);
+    }
+
+    // Extract the User from the generated config
+    let entraUser: string | undefined;
+    try {
+      const generatedConfig = await fs.readFile(tmpConfig, 'utf-8');
+      const userMatch = generatedConfig.match(/^\s*User\s+(.+)$/m);
+      if (userMatch) {
+        entraUser = userMatch[1].trim();
+      }
+    } catch { /* ignore */ }
+
+    // Clean up the temp config file — we have our own SSH config
+    try { await fs.unlink(tmpConfig); } catch { /* ignore */ }
+
+    return { success: true, entraUser };
+  } catch (err) {
+    console.error('[Board] az ssh config failed:', err);
+    return { success: false };
+  }
 }
 
 /** Check if the SSH key file exists at the expected path */

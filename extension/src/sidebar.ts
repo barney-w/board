@@ -142,6 +142,14 @@ export class QuickActionsProvider implements vscode.TreeDataProvider<ActionItem>
       const browserItem = new ActionItem('Open code-server', 'globe', 'board.openCodeServer');
       browserItem.tooltip = 'Open code-server in your browser';
       items.push(browserItem);
+
+      const cockpitItem = new ActionItem('Open Cockpit', 'dashboard', 'board.openCockpit');
+      cockpitItem.tooltip = 'System admin UI (localhost:9091)';
+      items.push(cockpitItem);
+
+      const portainerItem = new ActionItem('Open Portainer', 'package', 'board.openPortainer');
+      portainerItem.tooltip = 'Docker management UI (localhost:9444)';
+      items.push(portainerItem);
     }
 
     items.push(new ActionItem('Open in Azure Portal', 'link-external', 'board.openPortal'));
@@ -186,6 +194,8 @@ export class CheatsheetProvider implements vscode.TreeDataProvider<CheatsheetIte
       new CheatsheetItem('Start / Stop', vscode.TreeItemCollapsibleState.None, { description: 'power-manage VM', icon: 'play', command: 'board.start' }),
       new CheatsheetItem('First-Time Setup', vscode.TreeItemCollapsibleState.None, { description: 'Git + SSH keys', icon: 'gear', command: 'board.runSetup' }),
       new CheatsheetItem('Open code-server', vscode.TreeItemCollapsibleState.None, { description: 'Browser IDE', icon: 'globe', command: 'board.openCodeServer' }),
+      new CheatsheetItem('Open Cockpit', vscode.TreeItemCollapsibleState.None, { description: 'System admin UI', icon: 'dashboard', command: 'board.openCockpit' }),
+      new CheatsheetItem('Open Portainer', vscode.TreeItemCollapsibleState.None, { description: 'Docker management', icon: 'package', command: 'board.openPortainer' }),
     ];
 
     const termCmds = new CheatsheetItem('Terminal Commands', vscode.TreeItemCollapsibleState.Expanded, { icon: 'terminal' });

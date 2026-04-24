@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getConfig, isConfigured, getHostname, getResourceGroup, getVmName } from './config';
+import { getConfig, getHostname, getResourceGroup, getVmName } from './config';
 import { importBundle, BundlePayload } from './bundle';
 import { getBoardPassHtml } from './boardPassCard';
 
@@ -24,14 +24,10 @@ export class BoardPassEditorProvider implements vscode.CustomReadonlyEditorProvi
   ): Promise<void> {
     webviewPanel.webview.options = { enableScripts: true };
 
-    // Always show something immediately — never leave the panel blank
-    if (isConfigured()) {
-      this.showCard(webviewPanel, document.uri);
-    } else {
-      // Show a loading state while the import flow runs
-      webviewPanel.webview.html = getLoadingHtml();
-      await this.importAndShowCard(webviewPanel, document.uri);
-    }
+    // Always import the actual file — it may be for a different developer
+    // than the currently configured one, or a refreshed pass.
+    webviewPanel.webview.html = getLoadingHtml();
+    await this.importAndShowCard(webviewPanel, document.uri);
   }
 
   private showCard(
@@ -59,21 +55,11 @@ export class BoardPassEditorProvider implements vscode.CustomReadonlyEditorProvi
       };
     }
 
-    panel.webview.html = getBoardPassHtml(payload, true);
+    panel.webview.html = getBoardPassHtml(payload);
     panel.webview.onDidReceiveMessage(
       async (message) => {
-        switch (message.command) {
-          case 'connect':
-            await vscode.commands.executeCommand('board.connect');
-            break;
-          case 'deleteFile':
-            try {
-              await vscode.workspace.fs.delete(fileUri);
-              panel.webview.postMessage({ command: 'fileDeleted' });
-            } catch {
-              // File may already be deleted
-            }
-            break;
+        if (message.command === 'connect') {
+          await vscode.commands.executeCommand('board.connect');
         }
       },
       undefined,

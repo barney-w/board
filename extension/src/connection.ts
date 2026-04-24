@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getConfig, isConfigured, getSshHostAlias, getSshKeyPath } from './config';
-import { writeSshConfig, sshKeyExists, writeSshKey } from './ssh';
+import { writeSshConfig, sshKeyExists, writeSshKey, refreshEntraCerts } from './ssh';
 import { isAzCliAvailable, getVmStatus, startVm, VmStatus } from './azure';
 
 const execFileAsync = promisify(execFile);
@@ -129,6 +129,24 @@ export async function connect(context: vscode.ExtensionContext): Promise<void> {
         return;
       }
     }
+
+    // Refresh short-lived Entra ID certificates before connecting
+    const certResult = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Refreshing Entra ID certificates...',
+      },
+      async () => refreshEntraCerts(config),
+    );
+    if (!certResult.success) {
+      vscode.window.showErrorMessage(
+        'Failed to refresh Entra ID certificates. Ensure you are signed in with "az login".',
+      );
+      return;
+    }
+
+    // Re-write SSH config with the Entra user from the cert
+    await writeSshConfig(config, certResult.entraUser);
   }
 
   // 4. Check VM state (only if az CLI is available — degrade gracefully)

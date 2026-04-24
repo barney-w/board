@@ -136,6 +136,8 @@ function getCheatsheetHtml(): string {
       <tr><td>Board: Stop</td><td>Deallocate your VM (saves costs)</td></tr>
       <tr><td>Board: Run First-Time Setup</td><td>Configure Git identity + SSH keys on the VM</td></tr>
       <tr><td>Board: Open code-server</td><td>Open code-server in your browser</td></tr>
+      <tr><td>Board: Open Cockpit</td><td>System monitoring, logs, file browser (localhost:9091)</td></tr>
+      <tr><td>Board: Open Portainer</td><td>Docker container management and logs (localhost:9444)</td></tr>
       <tr><td>Board: Open Terminal</td><td>SSH terminal to your VM</td></tr>
       <tr><td>Board: Open Workspace Terminals</td><td>Open the standard terminal + Copilot split layout</td></tr>
       <tr><td>Board: Open in Azure Portal</td><td>Jump to the VM in the Azure portal</td></tr>
@@ -183,7 +185,19 @@ function getCheatsheetHtml(): string {
     <table>
       <tr><td>VS Code Desktop + SSH</td><td>Full Marketplace, Copilot, SSH key auth</td></tr>
       <tr><td>code-server</td><td>Browser-based, Open VSX, password auth</td></tr>
+      <tr><td>Cockpit</td><td>System monitoring, logs, file browser — localhost:9091</td></tr>
+      <tr><td>Portainer</td><td>Docker container management — localhost:9444 (self-signed cert, pwd in <code>~/.portainer-password</code>)</td></tr>
     </table>
+
+    <h2>Port Forwarding</h2>
+    <div class="note">
+      <strong>VS Code auto-forwards every port.</strong> When a service starts on the VM (API, database, Langfuse, etc.),
+      VS Code detects it and forwards the port to your localhost automatically. Check the <strong>Ports</strong> panel
+      (<code>Ctrl+Shift+P</code> &rarr; <em>Ports: Focus on Ports View</em>) to see all forwarded ports, open them in your
+      browser, or change visibility.<br><br>
+      <strong>Not using VS Code?</strong> Run <code>forward-ports</code> on the VM to get an SSH command that tunnels all
+      listening ports at once.
+    </div>
 
     <h2>Daily Workflow</h2>
     <div class="note">

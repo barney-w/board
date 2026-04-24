@@ -34,7 +34,7 @@ export async function openWorkspaceTerminals(): Promise<void> {
     iconPath: new vscode.ThemeIcon('sparkle'),
   });
   copilot.sendText(
-    'gh copilot 2>/dev/null || echo "Run gh auth login first, then: gh extension install github/gh-copilot && gh copilot"',
+    'if gh extension list 2>/dev/null | grep -q gh-copilot; then gh copilot; else echo "Run: gh auth login && gh extension install github/gh-copilot && gh copilot"; fi',
   );
 
   // Create the main terminal and focus it

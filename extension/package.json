@@ -30,6 +30,8 @@
       { "command": "board.openPortal", "title": "Board: Open in Azure Portal" },
       { "command": "board.openTerminal", "title": "Board: Open Terminal" },
       { "command": "board.openCodeServer", "title": "Board: Open code-server", "icon": "$(globe)" },
+      { "command": "board.openCockpit", "title": "Board: Open Cockpit", "icon": "$(dashboard)" },
+      { "command": "board.openPortainer", "title": "Board: Open Portainer", "icon": "$(package)" },
       { "command": "board.openWorkspace", "title": "Board: Open Workspace Terminals" },
       { "command": "board.cheatsheet", "title": "Board: Cheatsheet", "icon": "$(book)" },
       { "command": "board.showPass", "title": "Board: Show Board Pass", "icon": "$(credit-card)" }

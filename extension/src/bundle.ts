@@ -169,18 +169,20 @@ export async function importBundle(
     }
   }
 
-  // 7. Write SSH private key to ~/.ssh/devvm-<name> (infrastructure path)
-  const keyPath = getSshKeyPath({
-    ...getConfig(),
-    developerName: payload.developerName,
-  });
-  await writeSshKey(keyPath, payload.sshPrivateKey);
+  // 7. Write SSH private key to ~/.ssh/devvm-<name> (ssh-key auth only)
+  if (payload.authMethod !== 'entra-id') {
+    const keyPath = getSshKeyPath({
+      ...getConfig(),
+      developerName: payload.developerName,
+    });
+    await writeSshKey(keyPath, payload.sshPrivateKey);
 
-  // 8. Backup private key to SecretStorage
-  await context.secrets.store(
-    `board.sshKey.${payload.developerName}`,
-    payload.sshPrivateKey,
-  );
+    // 8. Backup private key to SecretStorage
+    await context.secrets.store(
+      `board.sshKey.${payload.developerName}`,
+      payload.sshPrivateKey,
+    );
+  }
 
   // 9. Save all settings to VS Code global config
   const cfg = vscode.workspace.getConfiguration('board');
