@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from board.azure.az import az_text
@@ -23,7 +23,7 @@ async def query_costs(
 
     Uses the Cost Management Query API via ``az rest``.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     if to_date is None:
         to_date = now.strftime("%Y-%m-%d")
     if from_date is None:

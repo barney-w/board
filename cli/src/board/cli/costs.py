@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import typer
 
@@ -35,15 +35,12 @@ def costs_command(
             raise typer.Exit(1) from exc
 
         # Resolve date range
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         if month:
             from_date = f"{month}-01"
-            # Last day of the month
+            # First day of next month
             year, mon = int(month[:4]), int(month[5:7])
-            if mon == 12:
-                to_date = f"{year + 1}-01-01"
-            else:
-                to_date = f"{year}-{mon + 1:02d}-01"
+            to_date = f"{year + 1}-01-01" if mon == 12 else f"{year}-{mon + 1:02d}-01"
         else:
             from_date = now.strftime("%Y-%m-01")
             to_date = now.strftime("%Y-%m-%d")

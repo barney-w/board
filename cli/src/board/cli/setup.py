@@ -71,10 +71,12 @@ async def _detect_public_ip() -> str:
     import aiohttp
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-            async with session.get("https://api.ipify.org") as resp:
-                if resp.status == 200:
-                    return (await resp.text()).strip()
+        async with (
+            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session,
+            session.get("https://api.ipify.org") as resp,
+        ):
+            if resp.status == 200:
+                return (await resp.text()).strip()
     except Exception:
         pass
     return ""

@@ -76,7 +76,7 @@ async def _run_export_pass(
     )
     if vm_check.returncode != 0 or not vm_check.stdout.strip():
         con.error(f"VM not found: {vm} in {rg}")
-        con.info(f"Check the developer name and environment are correct.")
+        con.info("Check the developer name and environment are correct.")
         con.info(f"List VMs with: board vm ls --env {environment}")
         return
 
