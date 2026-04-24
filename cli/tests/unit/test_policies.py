@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from board.core.errors import PolicyViolationError
 from board.core import policies as pol
+from board.core.errors import PolicyViolationError
 from board.models.policies import PoliciesConfig
 
 

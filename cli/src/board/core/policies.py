@@ -8,15 +8,11 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ruamel.yaml import YAML
 
 from board.core.errors import PolicyViolationError
 from board.models.policies import PoliciesConfig
-
-if TYPE_CHECKING:
-    pass
 
 
 def find_policies_file() -> Path | None:
