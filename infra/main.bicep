@@ -38,8 +38,11 @@ param enablePublicIp bool = true
 @description('Whether to allow direct HTTPS access (port 443) for browser IDE reverse proxy')
 param enableDirectHttps bool = false
 
-@description('Auto-shutdown time in HHmm format (local timezone)')
+@description('Idle-aware shutdown start time in HHmm format (VM powers off when idle after this)')
 param autoShutdownTime string = '1900'
+
+@description('Hard backstop shutdown time in HHmm format (VM is force-deallocated regardless of activity)')
+param backstopShutdownTime string = '2200'
 
 @description('Timezone for auto-shutdown')
 param autoShutdownTimezone string = 'AUS Eastern Standard Time'
@@ -97,7 +100,9 @@ param deploymentTimestamp string = utcNow('yyyy-MM-dd')
 var prefix = '${environment}-${regionShort}-devvm'
 var vmName = 'vm-${prefix}-${developerName}'
 var cloudInitRaw = loadTextContent('cloud-init/cloud-init.yaml')
-var cloudInitContent = replace(cloudInitRaw, '__BOARD_HOSTNAME__', 'devvm-${developerName}')
+var cloudInit1 = replace(cloudInitRaw, '__BOARD_HOSTNAME__', 'devvm-${developerName}')
+var cloudInit2 = replace(cloudInit1, '__SHUTDOWN_START_HOUR__', substring(autoShutdownTime, 0, 2))
+var cloudInitContent = replace(cloudInit2, '__SHUTDOWN_BACKSTOP_HOUR__', substring(backstopShutdownTime, 0, 2))
 var commonTags = {
   project: 'devvm'
   environment: environment
@@ -301,7 +306,7 @@ module autoShutdown './modules/auto-shutdown.bicep' = {
     vmName: vm.outputs.name
     vmResourceId: vm.outputs.resourceId
     location: location
-    shutdownTime: autoShutdownTime
+    shutdownTime: backstopShutdownTime
     timezone: autoShutdownTimezone
     enableNotification: enableAutoShutdownNotification
     notificationEmail: autoShutdownNotificationEmail
