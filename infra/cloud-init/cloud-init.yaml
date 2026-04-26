@@ -348,6 +348,96 @@ write_files:
       fi
       exit 0  # Idle — safe to shut down
 
+  - path: /home/devuser/.board/shutdown-config
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      # Board auto-shutdown configuration — values baked from policy at deploy time
+      SHUTDOWN_START_HOUR=__SHUTDOWN_START_HOUR__
+      SHUTDOWN_BACKSTOP_HOUR=__SHUTDOWN_BACKSTOP_HOUR__
+
+  - path: /home/devuser/.board/idle-shutdown.sh
+    owner: devuser:devuser
+    permissions: "0755"
+    defer: true
+    content: |
+      #!/usr/bin/env bash
+      # Board idle-aware shutdown — called by systemd timer.
+      # Checks is-idle.sh; if idle, gracefully powers off after a 60 s warning.
+      # DevTestLab backstop handles deallocation at SHUTDOWN_BACKSTOP_HOUR.
+      set -euo pipefail
+
+      CONFIG="/home/devuser/.board/shutdown-config"
+      TAG="board-idle-shutdown"
+
+      if [[ ! -f "$CONFIG" ]]; then
+          logger -t "$TAG" "No config at $CONFIG — skipping"
+          exit 0
+      fi
+      # shellcheck source=/dev/null
+      source "$CONFIG"
+
+      SHUTDOWN_START_HOUR="${SHUTDOWN_START_HOUR:-19}"
+      SHUTDOWN_BACKSTOP_HOUR="${SHUTDOWN_BACKSTOP_HOUR:-22}"
+
+      HOUR=$(date +%-H)
+
+      # Outside shutdown window — do nothing
+      if (( HOUR < SHUTDOWN_START_HOUR )); then
+          exit 0
+      fi
+
+      # Past backstop — force shutdown regardless of activity
+      if (( HOUR >= SHUTDOWN_BACKSTOP_HOUR )); then
+          logger -t "$TAG" "Backstop hour reached (${SHUTDOWN_BACKSTOP_HOUR}:00). Forcing shutdown."
+          wall "Board: Hard shutdown cutoff reached. Shutting down in 60 seconds."
+          sleep 60
+          sudo /sbin/poweroff
+          exit 0
+      fi
+
+      # Within window — check idle status
+      if /home/devuser/.board/is-idle.sh; then
+          logger -t "$TAG" "VM is idle during shutdown window. Starting 60 s grace period."
+          wall "Board: VM is idle. Auto-shutting down in 60 seconds. Connect to cancel."
+          sleep 60
+
+          # Re-check — developer may have connected during grace period
+          if /home/devuser/.board/is-idle.sh; then
+              logger -t "$TAG" "Still idle after grace period. Powering off."
+              sudo /sbin/poweroff
+          else
+              logger -t "$TAG" "Activity detected during grace period. Shutdown cancelled."
+          fi
+      else
+          logger -t "$TAG" "VM is active. Deferring shutdown."
+      fi
+
+  - path: /home/devuser/.config/systemd/user/board-idle-shutdown.service
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      [Unit]
+      Description=Board idle-aware shutdown check
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/bash /home/devuser/.board/idle-shutdown.sh
+
+  - path: /home/devuser/.config/systemd/user/board-idle-shutdown.timer
+    owner: devuser:devuser
+    permissions: "0644"
+    defer: true
+    content: |
+      [Unit]
+      Description=Check for idle shutdown every 15 minutes during shutdown window
+      [Timer]
+      OnCalendar=*-*-* 19,20,21:00/15
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
   - path: /home/devuser/.board/forward-ports.sh
     owner: devuser:devuser
     permissions: "0755"
@@ -867,6 +957,13 @@ runcmd:
 
   # ── Enable board health check timer ──
   - su - devuser -c "mkdir -p ~/.config/systemd/user && systemctl --user daemon-reload && systemctl --user enable --now board-check.timer" || true
+
+  # ── Idle-aware shutdown: passwordless poweroff for devuser ──
+  - echo "devuser ALL=(ALL) NOPASSWD: /sbin/poweroff" > /etc/sudoers.d/board-idle-shutdown
+  - chmod 440 /etc/sudoers.d/board-idle-shutdown
+
+  # ── Enable idle shutdown timer ──
+  - su - devuser -c "systemctl --user enable --now board-idle-shutdown.timer" || true
 
   # ── Signal completion ──
   - touch /home/devuser/.cloud-init-complete
