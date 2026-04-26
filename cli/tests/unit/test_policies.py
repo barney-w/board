@@ -88,6 +88,12 @@ class TestEnforce:
 
     def test_valid_config_passes(self, default_policies: PoliciesConfig) -> None:
         warnings = self._enforce(default_policies)
+        # MFA soft warning is expected when require_mfa=True + entra-id auth.
+        assert all("MFA" in w for w in warnings)
+
+    def test_no_mfa_warning_when_disabled(self) -> None:
+        cfg = PoliciesConfig(require_mfa=False)
+        warnings = self._enforce(cfg)
         assert warnings == []
 
     def test_disallowed_vm_size(self, default_policies: PoliciesConfig) -> None:

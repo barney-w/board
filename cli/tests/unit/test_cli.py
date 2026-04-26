@@ -52,7 +52,14 @@ class TestCommandRegistration:
     def test_admin_help(self) -> None:
         result = runner.invoke(app, ["admin", "--help"])
         assert result.exit_code == 0
-        assert "admin" in result.output.lower() or "control panel" in result.output.lower()
+        output = result.output.lower()
+        assert "admin" in output or "control panel" in output
+        assert "mfa-setup" in output
+
+    def test_admin_mfa_setup_help(self) -> None:
+        result = runner.invoke(app, ["admin", "mfa-setup", "--help"])
+        assert result.exit_code == 0
+        assert "mfa" in result.output.lower()
 
     def test_fleet_help(self) -> None:
         result = runner.invoke(app, ["fleet", "--help"])

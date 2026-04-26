@@ -10,7 +10,8 @@ import pytest
 from board.azure.mfa import (
     _POLICY_DISPLAY_NAME,
     _resolve_vm_signin_app_id,
-    ensure_mfa_policy,
+    check_mfa_policy,
+    create_mfa_policy,
     find_existing_policy,
 )
 from board.core.errors import BoardError
@@ -91,8 +92,35 @@ class TestFindExistingPolicy:
         assert result is None
 
 
-class TestEnsureMfaPolicy:
-    """Policy creation."""
+class TestCheckMfaPolicy:
+    """Read-only policy check."""
+
+    @pytest.fixture(autouse=True)
+    def _patch(self) -> None:
+        self._find = AsyncMock(return_value=None)
+        self._patcher = patch("board.azure.mfa.find_existing_policy", self._find)
+        self._patcher.start()
+        yield  # type: ignore[misc]
+        self._patcher.stop()
+
+    async def test_returns_true_when_exists(self) -> None:
+        self._find.return_value = {
+            "displayName": _POLICY_DISPLAY_NAME,
+            "state": "enabled",
+        }
+        exists, name = await check_mfa_policy()
+        assert exists is True
+        assert name == _POLICY_DISPLAY_NAME
+
+    async def test_returns_false_when_missing(self) -> None:
+        self._find.return_value = None
+        exists, name = await check_mfa_policy()
+        assert exists is False
+        assert name is None
+
+
+class TestCreateMfaPolicy:
+    """Policy creation (requires elevated role)."""
 
     @pytest.fixture(autouse=True)
     def _patch(self) -> None:
@@ -112,7 +140,7 @@ class TestEnsureMfaPolicy:
             p.stop()
 
     async def test_creates_policy_when_none_exists(self) -> None:
-        ok, msg = await ensure_mfa_policy()
+        ok, msg = await create_mfa_policy()
         assert ok is True
         assert "created" in msg.lower()
         # Verify the POST was made with correct body.
@@ -130,19 +158,19 @@ class TestEnsureMfaPolicy:
             "displayName": _POLICY_DISPLAY_NAME,
             "state": "enabled",
         }
-        ok, msg = await ensure_mfa_policy()
+        ok, msg = await create_mfa_policy()
         assert ok is True
         assert "already exists" in msg.lower()
         self._az_text.assert_not_called()
 
     async def test_handles_permission_error(self) -> None:
         self._az_text.side_effect = BoardError("az rest failed: 403 Forbidden")
-        ok, msg = await ensure_mfa_policy()
+        ok, msg = await create_mfa_policy()
         assert ok is False
         assert "Conditional Access Administrator" in msg
 
     async def test_handles_generic_error(self) -> None:
         self._az_text.side_effect = BoardError("az rest failed: network timeout")
-        ok, msg = await ensure_mfa_policy()
+        ok, msg = await create_mfa_policy()
         assert ok is False
         assert "network timeout" in msg.lower()
