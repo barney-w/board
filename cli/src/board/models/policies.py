@@ -10,6 +10,7 @@ class AutoShutdownPolicy(BaseModel):
 
     enabled: bool = True
     time: str = "1900"
+    backstop_time: str = "2200"
     timezone: str = "AUS Eastern Standard Time"
     user_can_override: bool = False
 
