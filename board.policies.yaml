@@ -28,3 +28,4 @@ expiration:
   max_days: 90
 
 require_entra_auth: true
+require_mfa: true
