@@ -1,8 +1,13 @@
-"""AES-256-GCM encryption compatible with extension/src/bundle.ts."""
+"""AES-256-GCM encryption compatible with extension/src/bundle.ts.
+
+Entra ID bundles are stored as plaintext JSON (no passphrase needed).
+SSH-key bundles are encrypted with AES-256-GCM via PBKDF2-derived key.
+"""
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -27,6 +32,20 @@ def _derive_key(passphrase: str, salt: bytes) -> bytes:
         iterations=_PBKDF2_ITERATIONS,
     )
     return kdf.derive(passphrase.encode("utf-8"))
+
+
+def wrap_plaintext(payload_json: str) -> BundleEnvelope:
+    """Wrap *payload_json* in an unencrypted :class:`BundleEnvelope` for Entra ID auth.
+
+    No passphrase is needed — the payload contains only connection metadata.
+    """
+    payload_dict = json.loads(payload_json)
+    return BundleEnvelope(
+        version=2,
+        format="board-pass",
+        auth_method="entra-id",
+        payload=payload_dict,
+    )
 
 
 def encrypt(payload_json: str, passphrase: str) -> BundleEnvelope:

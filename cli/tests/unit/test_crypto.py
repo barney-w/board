@@ -1,4 +1,4 @@
-"""Round-trip tests for AES-256-GCM encrypt/decrypt."""
+"""Round-trip tests for AES-256-GCM encrypt/decrypt and plaintext wrapping."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from board.bundle.crypto import decrypt, encrypt
+from board.bundle.crypto import decrypt, encrypt, wrap_plaintext
 
 SAMPLE_PAYLOAD = json.dumps(
     {
@@ -20,6 +20,24 @@ SAMPLE_PAYLOAD = json.dumps(
         "authMethod": "ssh-key",
         "sshPrivateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
         "sshPublicKey": "ssh-ed25519 AAAA fake@host",
+        "resourceGroup": "rg-personal-aue-devvm",
+        "vmName": "vm-personal-aue-devvm-jbloggs",
+        "issuedAt": "2026-03-29T00:00:00Z",
+        "validUntil": "2026-04-28T00:00:00Z",
+    }
+)
+
+ENTRA_PAYLOAD = json.dumps(
+    {
+        "developerName": "jbloggs",
+        "environment": "personal",
+        "region": "australiaeast",
+        "regionShort": "aue",
+        "hostname": "devvm-jbloggs.australiaeast.cloudapp.azure.com",
+        "username": "devuser",
+        "authMethod": "entra-id",
+        "sshPrivateKey": "",
+        "sshPublicKey": "",
         "resourceGroup": "rg-personal-aue-devvm",
         "vmName": "vm-personal-aue-devvm-jbloggs",
         "issuedAt": "2026-03-29T00:00:00Z",
@@ -89,3 +107,33 @@ class TestRoundTrip:
         envelope = encrypt(large, passphrase)
         result = decrypt(envelope, passphrase)
         assert json.loads(result) == json.loads(large)
+
+
+class TestPlaintextEnvelope:
+    """Tests for Entra ID plaintext (unencrypted) envelopes."""
+
+    def test_wrap_plaintext_preserves_payload(self) -> None:
+        envelope = wrap_plaintext(ENTRA_PAYLOAD)
+        assert envelope.payload == json.loads(ENTRA_PAYLOAD)
+
+    def test_wrap_plaintext_sets_auth_method(self) -> None:
+        envelope = wrap_plaintext(ENTRA_PAYLOAD)
+        assert envelope.auth_method == "entra-id"
+
+    def test_wrap_plaintext_envelope_fields(self) -> None:
+        envelope = wrap_plaintext(ENTRA_PAYLOAD)
+        assert envelope.version == 2
+        assert envelope.format == "board-pass"
+        # Encrypted fields should be empty
+        assert envelope.salt == ""
+        assert envelope.iv == ""
+        assert envelope.ciphertext == ""
+        assert envelope.tag == ""
+
+    def test_wrap_plaintext_serialises_with_alias(self) -> None:
+        """Ensure authMethod (not auth_method) appears in JSON output."""
+        envelope = wrap_plaintext(ENTRA_PAYLOAD)
+        dumped = envelope.model_dump(by_alias=True)
+        assert "authMethod" in dumped
+        assert dumped["authMethod"] == "entra-id"
+        assert dumped["payload"]["developerName"] == "jbloggs"
