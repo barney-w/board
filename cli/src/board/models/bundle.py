@@ -69,14 +69,26 @@ class BundlePayload(BaseModel):
 
 
 class BundleEnvelope(BaseModel):
-    """Encrypted board pass envelope — JSON on disk.
+    """Board pass envelope — JSON on disk.
+
+    Encrypted envelopes (ssh-key auth) have salt/iv/ciphertext/tag fields.
+    Plaintext envelopes (entra-id auth) have a nested payload field instead.
 
     Fields MUST match extension/src/bundle.ts BundleEnvelope interface.
     """
 
+    model_config = ConfigDict(
+        alias_generator=_to_camel,
+        populate_by_name=True,
+    )
+
     version: int = 2
     format: str = "board-pass"
-    salt: str
-    iv: str
-    ciphertext: str
-    tag: str
+    # Encrypted envelope fields (ssh-key auth only)
+    salt: str = ""
+    iv: str = ""
+    ciphertext: str = ""
+    tag: str = ""
+    # Plaintext envelope fields (entra-id auth)
+    auth_method: str = ""
+    payload: dict | None = None
