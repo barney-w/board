@@ -30,7 +30,11 @@ def show_command() -> None:
         "",
         "Schedules:",
         f"  Auto-shutdown:   {'enabled' if policies.auto_shutdown.enabled else 'disabled'}"
-        + (f" at {policies.auto_shutdown.time}" if policies.auto_shutdown.enabled else ""),
+        + (
+            f" at {policies.auto_shutdown.time} (idle-aware, backstop {policies.auto_shutdown.backstop_time})"
+            if policies.auto_shutdown.enabled
+            else ""
+        ),
         f"  Auto-start:      {'enabled' if policies.auto_start.enabled else 'disabled'}"
         + (f" at {policies.auto_start.time}" if policies.auto_start.enabled else ""),
         "",

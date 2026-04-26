@@ -498,7 +498,7 @@ async def _run_up(
         "OS:            Ubuntu 24.04 LTS",
         "Disk:          128 GB Standard SSD",
         f"SSH source:    {ssh_source_display}",
-        "Auto-shutdown: 19:00 AEST",
+        "Auto-shutdown: 19:00 AEST (idle-aware, backstop 22:00)",
         f"Auto-start:   {auto_start_display}",
         "",
         "Estimated monthly cost:",
@@ -664,6 +664,9 @@ async def _run_up(
         "allowedSshSourceIP": allowed_ssh_source_ip,
         "enableAutoStart": enable_auto_start,
     }
+    if policies is not None and policies.auto_shutdown.enabled:
+        deploy_params["autoShutdownTime"] = policies.auto_shutdown.time
+        deploy_params["backstopShutdownTime"] = policies.auto_shutdown.backstop_time
     if enable_auto_start:
         deploy_params["autoStartTime"] = auto_start_time
     if auth_method == "entra-id":
