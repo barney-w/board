@@ -707,15 +707,18 @@ async def _run_up(
 
     # ── Conditional Access: MFA for VM SSH ──
     if auth_method == "entra-id":
-        from board.azure.mfa import ensure_mfa_policy
+        from board.azure.mfa import check_mfa_policy
 
-        with con.spin("Ensuring MFA policy for Azure Linux VM SSH..."):
-            mfa_ok, mfa_msg = await ensure_mfa_policy()
-        if mfa_ok:
-            con.success(mfa_msg)
+        with con.spin("Checking MFA policy for Azure Linux VM SSH..."):
+            mfa_exists, mfa_name = await check_mfa_policy()
+        if mfa_exists:
+            con.success(f"MFA policy active: {mfa_name}")
         else:
-            con.warn(mfa_msg)
-            provision_warnings.append(f"MFA: {mfa_msg}")
+            con.warn("No MFA Conditional Access policy found for Azure Linux VM SSH.")
+            con.warn("A tenant admin should run: board admin mfa-setup")
+            provision_warnings.append(
+                "MFA: No Conditional Access policy. Run 'board admin mfa-setup'."
+            )
 
     # ── Cloud-init wait ──
     cloud_init_start = time.monotonic()

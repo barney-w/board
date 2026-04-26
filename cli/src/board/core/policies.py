@@ -69,6 +69,13 @@ def enforce(
     if policies.require_entra_auth and auth_method != "entra-id":
         violations.append("Policy requires Entra ID authentication (SSH key not allowed)")
 
+    # MFA (soft warning — actual enforcement is via Conditional Access)
+    if policies.require_mfa and auth_method == "entra-id":
+        warnings.append(
+            "Policy requires MFA for VM SSH. "
+            "Ensure 'board admin mfa-setup' has been run by a tenant admin."
+        )
+
     # VM count per user
     existing_count = _count_user_vms(developer_name, resource_group)
     if existing_count >= policies.max_vms_per_user:

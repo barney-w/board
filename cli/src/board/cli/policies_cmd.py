@@ -26,6 +26,7 @@ def show_command() -> None:
         f"Allowed VM sizes:  {', '.join(policies.allowed_vm_sizes)}",
         f"Allowed regions:   {', '.join(policies.allowed_regions)}",
         f"Require Entra ID:  {policies.require_entra_auth}",
+        f"Require MFA:       {policies.require_mfa}",
         "",
         "Schedules:",
         f"  Auto-shutdown:   {'enabled' if policies.auto_shutdown.enabled else 'disabled'}"
