@@ -79,7 +79,13 @@ class TestBicepParameterNames:
         secure_params = re.findall(r"@secure\(\)\s*\n\s*param\s+(\w+)\s+\w+", bicep_source)
         required = set(all_params) | set(secure_params)
 
-        setup_provides = {"developerName", "vmSku", "adminSshPublicKey", "environment", "allowedSshSourceIP"}
+        setup_provides = {
+            "developerName",
+            "vmSku",
+            "adminSshPublicKey",
+            "environment",
+            "allowedSshSourceIP",
+        }
         missing = required - setup_provides
         assert not missing, (
             f"Bicep requires params not provided by setup.py: {missing}. "

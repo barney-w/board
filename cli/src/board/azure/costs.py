@@ -49,9 +49,12 @@ async def query_costs(
 
     raw = await az_text(
         "rest",
-        "--method", "POST",
-        "--url", url,
-        "--body", json.dumps(body),
+        "--method",
+        "POST",
+        "--url",
+        url,
+        "--body",
+        json.dumps(body),
         timeout=60,
     )
 
@@ -76,10 +79,12 @@ async def query_costs(
     for row in rows:
         if len(row) <= max(cost_idx, owner_idx):
             continue  # skip malformed rows
-        results.append({
-            "owner": row[owner_idx] or "untagged",
-            "cost": round(float(row[cost_idx]), 2),
-            "currency": row[currency_idx] if currency_idx < len(row) else "AUD",
-        })
+        results.append(
+            {
+                "owner": row[owner_idx] or "untagged",
+                "cost": round(float(row[cost_idx]), 2),
+                "currency": row[currency_idx] if currency_idx < len(row) else "AUD",
+            }
+        )
 
     return sorted(results, key=lambda r: r["cost"], reverse=True)

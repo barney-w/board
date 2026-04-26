@@ -20,11 +20,17 @@ def _resolve_auth_method(rg: str, vm: str) -> str:
     """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
     result = subprocess.run(  # noqa: S603, S607
         [
-            "az", "vm", "show",
-            "--resource-group", rg,
-            "--name", vm,
-            "--query", 'tags."auth-method"',
-            "-o", "tsv",
+            "az",
+            "vm",
+            "show",
+            "--resource-group",
+            rg,
+            "--name",
+            vm,
+            "--query",
+            'tags."auth-method"',
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,
@@ -72,7 +78,9 @@ async def _run_export_pass(
     # Verify the VM exists before generating a pass
     vm_check = subprocess.run(
         ["az", "vm", "show", "--resource-group", rg, "--name", vm, "--query", "name", "-o", "tsv"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if vm_check.returncode != 0 or not vm_check.stdout.strip():
         con.error(f"VM not found: {vm} in {rg}")
@@ -94,7 +102,6 @@ async def _run_export_pass(
     key_path = cfg.ssh_key_path_expanded(name)
 
     if auth_method == "ssh-key":
-
         if not key_path.exists():
             con.error(f"SSH private key not found: {key_path}")
             con.info(f"Generate one with: board vm keygen {name}")
@@ -213,7 +220,11 @@ def export_pass_command(
     environment: str = typer.Option("", "--env", help="Environment name."),
     region: str = typer.Option("", "--region", help="Azure region."),
     region_short: str = typer.Option("", "--region-short", help="Short region code."),
-    auth: str = typer.Option("", "--auth", help="Force auth method: entra-id or ssh-key (default: auto-detect from VM tag)."),
+    auth: str = typer.Option(
+        "",
+        "--auth",
+        help="Force auth method: entra-id or ssh-key (default: auto-detect from VM tag).",
+    ),
 ) -> None:
     """Create an encrypted board pass for a developer."""
     asyncio.run(_run_export_pass(name, environment, region, region_short, auth_override=auth))

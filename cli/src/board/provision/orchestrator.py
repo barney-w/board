@@ -112,7 +112,9 @@ async def provision_projects(
     if provisioned:
         workspace_content = generate_workspace(provisioned)
         await ssh.run("mkdir -p ~/projects/.board")
-        upload_cmd = f"cat > ~/projects/.board/board.code-workspace << 'WSEOF'\n{workspace_content}\nWSEOF"
+        upload_cmd = (
+            f"cat > ~/projects/.board/board.code-workspace << 'WSEOF'\n{workspace_content}\nWSEOF"
+        )
         await ssh.run(upload_cmd, check=False)
         if console and not quiet:
             console.success("Uploaded .board/board.code-workspace")
@@ -194,9 +196,7 @@ async def provision_projects(
     if provisioned:
         quickstart_content = generate_quickstart(provisioned)
         await ssh.run("mkdir -p ~/projects/.board")
-        upload_cmd = (
-            f"cat > ~/projects/QUICKSTART.md << 'QSEOF'\n{quickstart_content}\nQSEOF"
-        )
+        upload_cmd = f"cat > ~/projects/QUICKSTART.md << 'QSEOF'\n{quickstart_content}\nQSEOF"
         await ssh.run(upload_cmd, check=False)
         if console and not quiet:
             console.success("Uploaded QUICKSTART.md")
