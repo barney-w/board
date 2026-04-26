@@ -224,11 +224,17 @@ def refresh_entra_certs(alias: str, resource_group: str, vm_name: str) -> tuple[
     tmp_config = cert_dir / "ssh_config"
     result = subprocess.run(
         [
-            "az", "ssh", "config",
-            "-f", str(tmp_config),
-            "--resource-group", resource_group,
-            "--name", vm_name,
-            "--keys-dest-folder", str(cert_dir),
+            "az",
+            "ssh",
+            "config",
+            "-f",
+            str(tmp_config),
+            "--resource-group",
+            resource_group,
+            "--name",
+            vm_name,
+            "--keys-dest-folder",
+            str(cert_dir),
             "--overwrite",
         ],
         capture_output=True,

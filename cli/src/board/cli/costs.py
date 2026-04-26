@@ -17,7 +17,9 @@ DEFAULT_REGION = "aue"
 def costs_command(
     developer: str = typer.Option("", "--developer", "-d", help="Filter by developer name."),
     env: str = typer.Option("", "--env", help="Environment name."),
-    month: str = typer.Option("", "--month", "-m", help="Month in YYYY-MM format (default: current)."),
+    month: str = typer.Option(
+        "", "--month", "-m", help="Month in YYYY-MM format (default: current)."
+    ),
 ) -> None:
     """Show cost breakdown for developer VMs."""
 

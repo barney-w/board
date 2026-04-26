@@ -28,11 +28,17 @@ def _resolve_auth_method(name: str, env: str, region_short: str) -> str:
     vm = cfg.vm_name(env, region_short, name)
     result = subprocess.run(  # noqa: S603, S607
         [
-            "az", "vm", "show",
-            "--resource-group", rg,
-            "--name", vm,
-            "--query", 'tags."auth-method"',
-            "-o", "tsv",
+            "az",
+            "vm",
+            "show",
+            "--resource-group",
+            rg,
+            "--name",
+            vm,
+            "--query",
+            'tags."auth-method"',
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,
@@ -129,7 +135,9 @@ def ssh(
 
         # 2. Write/update SSH config with User + LocalForward directives
         block = build_entra_id_config_block(
-            alias=alias, hostname=fqdn, user=entra_user or None,
+            alias=alias,
+            hostname=fqdn,
+            user=entra_user or None,
         )
         write_managed_block(ssh_config_path, alias, block)
 
@@ -337,11 +345,17 @@ def _resolve_vm_resource_id(rg: str, vm_name_str: str) -> str:
     """Get the full resource ID of a VM."""
     result = subprocess.run(  # noqa: S603, S607
         [
-            "az", "vm", "show",
-            "--resource-group", rg,
-            "--name", vm_name_str,
-            "--query", "id",
-            "-o", "tsv",
+            "az",
+            "vm",
+            "show",
+            "--resource-group",
+            rg,
+            "--name",
+            vm_name_str,
+            "--query",
+            "id",
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,
@@ -371,11 +385,18 @@ def _assign_role(principal_id: str, role_name: str, scope: str) -> bool:
     """Assign an Azure RBAC role. Returns True on success."""
     result = subprocess.run(  # noqa: S603, S607
         [
-            "az", "role", "assignment", "create",
-            "--assignee-object-id", principal_id,
-            "--assignee-principal-type", "User",
-            "--role", role_name,
-            "--scope", scope,
+            "az",
+            "role",
+            "assignment",
+            "create",
+            "--assignee-object-id",
+            principal_id,
+            "--assignee-principal-type",
+            "User",
+            "--role",
+            role_name,
+            "--scope",
+            scope,
         ],
         capture_output=True,
         text=True,
@@ -394,7 +415,9 @@ def _assign_role(principal_id: str, role_name: str, scope: str) -> bool:
 def grant_access(
     email: str = typer.Argument(..., help="Developer's email address."),
     name: str = typer.Argument(..., help="Developer name / VM name suffix (e.g. jbloggs)."),
-    role: str = typer.Option("developer", "--role", "-r", help="Board role: admin, developer, viewer."),
+    role: str = typer.Option(
+        "developer", "--role", "-r", help="Board role: admin, developer, viewer."
+    ),
     env: str = typer.Option("", "--env", help="Environment name."),
 ) -> None:
     """Grant access to a developer VM with a board role (admin/developer/viewer)."""

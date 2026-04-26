@@ -30,11 +30,17 @@ def _resolve_auth_method(rg: str, vm: str) -> str:
     """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
     result = subprocess.run(  # noqa: S603, S607
         [
-            "az", "vm", "show",
-            "--resource-group", rg,
-            "--name", vm,
-            "--query", 'tags."auth-method"',
-            "-o", "tsv",
+            "az",
+            "vm",
+            "show",
+            "--resource-group",
+            rg,
+            "--name",
+            vm,
+            "--query",
+            'tags."auth-method"',
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,
@@ -73,7 +79,9 @@ def show(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
     location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
     auth: str = typer.Option("auto", "--auth", help="Auth method: auto, ssh-key, or entra-id."),
-    env: str = typer.Option("", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."),
+    env: str = typer.Option(
+        "", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."
+    ),
     region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
 ) -> None:
     """Print the SSH config block for a developer."""
@@ -92,7 +100,9 @@ def write(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
     location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
     auth: str = typer.Option("auto", "--auth", help="Auth method: auto, ssh-key, or entra-id."),
-    env: str = typer.Option("", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."),
+    env: str = typer.Option(
+        "", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."
+    ),
     region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
 ) -> None:
     """Write SSH config block to ~/.ssh/config (idempotent)."""

@@ -80,9 +80,7 @@ def enforce(
     # Total VM count
     total_count = _count_total_vms(resource_group)
     if total_count >= policies.max_vms_total:
-        violations.append(
-            f"Resource group has {total_count} VM(s) (max: {policies.max_vms_total})"
-        )
+        violations.append(f"Resource group has {total_count} VM(s) (max: {policies.max_vms_total})")
 
     if violations:
         msg = "Policy violations:\n" + "\n".join(f"  - {v}" for v in violations)
@@ -95,10 +93,15 @@ def _count_user_vms(developer_name: str, resource_group: str) -> int:
     """Count existing VMs owned by a developer via Azure tags."""
     result = subprocess.run(
         [
-            "az", "vm", "list",
-            "-g", resource_group,
-            "--query", f"[?tags.project=='devvm' && tags.owner=='{developer_name}'] | length(@)",
-            "-o", "tsv",
+            "az",
+            "vm",
+            "list",
+            "-g",
+            resource_group,
+            "--query",
+            f"[?tags.project=='devvm' && tags.owner=='{developer_name}'] | length(@)",
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,
@@ -116,10 +119,15 @@ def _count_total_vms(resource_group: str) -> int:
     """Count total devvm-tagged VMs in the resource group."""
     result = subprocess.run(
         [
-            "az", "vm", "list",
-            "-g", resource_group,
-            "--query", "[?tags.project=='devvm'] | length(@)",
-            "-o", "tsv",
+            "az",
+            "vm",
+            "list",
+            "-g",
+            resource_group,
+            "--query",
+            "[?tags.project=='devvm'] | length(@)",
+            "-o",
+            "tsv",
         ],
         capture_output=True,
         text=True,

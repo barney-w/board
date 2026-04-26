@@ -99,5 +99,5 @@ class LlmConfig:
     """
 
     provider: Literal["foundry", "anthropic", "none"] = "none"
-    api_key: str | None = None      # Foundry API key or direct Anthropic key
-    endpoint: str | None = None     # Foundry endpoint URL
+    api_key: str | None = None  # Foundry API key or direct Anthropic key
+    endpoint: str | None = None  # Foundry endpoint URL
