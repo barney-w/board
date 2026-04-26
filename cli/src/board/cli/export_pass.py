@@ -1,8 +1,13 @@
-"""board export-pass — create an encrypted board pass for another developer."""
+"""board export-pass — create a board pass for another developer.
+
+Entra ID passes are plaintext (no passphrase needed).
+SSH-key passes are encrypted with AES-256-GCM.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 
@@ -56,7 +61,7 @@ async def _run_export_pass(
     region_short: str = "",
     auth_override: str = "",
 ) -> None:
-    """Create an encrypted board pass."""
+    """Create a board pass (plaintext for Entra ID, encrypted for SSH-key)."""
     # Resolve parameters
     if not name:
         name = await prompts.input_validated(
@@ -115,17 +120,6 @@ async def _run_export_pass(
         private_key = key_path.read_text()
         public_key = pub_path.read_text().strip()
 
-    # Get passphrase
-    passphrase = await prompts.secret("Passphrase for board pass (min 8 chars)")
-    if len(passphrase) < 8:
-        con.error("Passphrase must be at least 8 characters.")
-        return
-
-    passphrase_confirm = await prompts.secret("Confirm passphrase")
-    if passphrase != passphrase_confirm:
-        con.error("Passphrases do not match.")
-        return
-
     # Build payload
     from board.bundle.payload import build_payload
 
@@ -147,18 +141,42 @@ async def _run_export_pass(
     # VS Code tunnel URL provisioning is implemented. The extension already
     # handles the browserIde field if present — see bundle.ts step 10b.
 
-    # Encrypt
-    from board.bundle.crypto import encrypt
-
     payload_json = payload.model_dump_json(by_alias=True)
-    envelope = encrypt(payload_json, passphrase)
+
+    if auth_method == "entra-id":
+        # Entra ID: plaintext envelope — no passphrase needed
+        from board.bundle.crypto import wrap_plaintext
+
+        envelope = wrap_plaintext(payload_json)
+    else:
+        # SSH-key: encrypted envelope — passphrase required
+        passphrase = await prompts.secret("Passphrase for board pass (min 8 chars)")
+        if len(passphrase) < 8:
+            con.error("Passphrase must be at least 8 characters.")
+            return
+
+        passphrase_confirm = await prompts.secret("Confirm passphrase")
+        if passphrase != passphrase_confirm:
+            con.error("Passphrases do not match.")
+            return
+
+        from board.bundle.crypto import encrypt
+
+        envelope = encrypt(payload_json, passphrase)
 
     # Write .board-pass file
     output_dir = Path.cwd()
     pass_filename = f"{name}.board-pass"
     pass_path = output_dir / pass_filename
 
-    pass_path.write_text(envelope.model_dump_json(indent=2))
+    # Exclude empty strings and None to keep the envelope clean:
+    # encrypted envelopes omit authMethod/payload, plaintext omit salt/iv/ciphertext/tag
+    envelope_dict = {
+        k: v
+        for k, v in envelope.model_dump(by_alias=True).items()
+        if v not in ("", None)
+    }
+    pass_path.write_text(json.dumps(envelope_dict, indent=2))
 
     # Build starter-kit zip
     from board.bundle.package import build_zip
@@ -210,9 +228,14 @@ async def _run_export_pass(
     )
 
     con.info(f"Send {bundle_filename} to {name}.")
-    con.info("Share the passphrase separately (different channel).")
-    if vsix_path:
-        con.info("They unzip it, double-click 'Setup Board', enter the passphrase — done.")
+    if auth_method == "entra-id":
+        con.info("No passphrase needed — Entra ID handles authentication.")
+        if vsix_path:
+            con.info("They unzip it, double-click 'Setup Board', and click Connect — done.")
+    else:
+        con.info("Share the passphrase separately (different channel).")
+        if vsix_path:
+            con.info("They unzip it, double-click 'Setup Board', enter the passphrase — done.")
 
 
 def export_pass_command(
@@ -226,5 +249,5 @@ def export_pass_command(
         help="Force auth method: entra-id or ssh-key (default: auto-detect from VM tag).",
     ),
 ) -> None:
-    """Create an encrypted board pass for a developer."""
+    """Create a board pass for a developer."""
     asyncio.run(_run_export_pass(name, environment, region, region_short, auth_override=auth))
