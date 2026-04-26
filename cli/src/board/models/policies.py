@@ -50,3 +50,4 @@ class PoliciesConfig(BaseModel):
     auto_start: AutoStartPolicy = AutoStartPolicy()
     expiration: ExpirationPolicy = ExpirationPolicy()
     require_entra_auth: bool = True
+    require_mfa: bool = True
