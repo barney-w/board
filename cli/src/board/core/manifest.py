@@ -225,16 +225,19 @@ def generate_quickstart(manifests: list[ProjectManifest]) -> str:
             for task in m.dev.tasks:
                 tasks_to_show.append((task.label, task.run))
         elif m.vscode and m.vscode.tasks:
-            for task in m.vscode.tasks:
+            for vscode_task in m.vscode.tasks:
                 # Replace VS Code variables with actual paths
-                cmd = task.command.replace("${workspaceFolder}", f"~/projects/{project_dir}")
-                tasks_to_show.append((task.label, cmd))
+                cmd = vscode_task.command.replace("${workspaceFolder}", f"~/projects/{project_dir}")
+                tasks_to_show.append((vscode_task.label, cmd))
 
         # Services — only add log/restart if no dev or vscode tasks cover them
         if m.services and not m.dev and not (m.vscode and m.vscode.tasks):
             for svc in m.services:
                 tasks_to_show.append(
-                    (f"View {svc.name} logs", f"journalctl --user -u {svc.name} -f --no-hostname -o cat")
+                    (
+                        f"View {svc.name} logs",
+                        f"journalctl --user -u {svc.name} -f --no-hostname -o cat",
+                    )
                 )
                 tasks_to_show.append(
                     (f"Restart {svc.name}", f"systemctl --user restart {svc.name}")
@@ -536,8 +539,7 @@ def generate_check_script(manifests: list[ProjectManifest]) -> str:
             for var_name in m.env.required:  # type: ignore[union-attr]
                 parts.append(f'if [[ -f "{env_path}" ]]; then')
                 parts.append(
-                    f'    check "{var_name}" "set" '
-                    f"\"grep -q '^{var_name}=.\\+' \\\"{env_path}\\\"\""
+                    f'    check "{var_name}" "set" "grep -q \'^{var_name}=.\\+\' \\"{env_path}\\""'
                 )
                 parts.append("else")
                 parts.append(f'    check "{var_name}" "missing" "false"')

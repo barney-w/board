@@ -380,7 +380,7 @@ class ProvisionEngine:
 
             if env_lines:
                 # Only write vars that the manifest actually references
-                manifest_vars = set()
+                manifest_vars: set[str] = set()
                 if self.manifest.env.keyvault_secrets:
                     manifest_vars.update(self.manifest.env.keyvault_secrets.keys())
                 if self.manifest.env.hardcoded:
@@ -389,14 +389,13 @@ class ProvisionEngine:
                     manifest_vars.update(self.manifest.env.required)
 
                 filtered = [
-                    line for line in env_lines
+                    line
+                    for line in env_lines
                     if line.split("=", 1)[0] in manifest_vars or not manifest_vars
                 ]
 
                 if filtered:
-                    append_script = "\n".join(
-                        f'echo "{line}" >> "{env_file}"' for line in filtered
-                    )
+                    append_script = "\n".join(f'echo "{line}" >> "{env_file}"' for line in filtered)
                     if await self._run_ok(f"bash -c '{append_script}'"):
                         for line in filtered:
                             var_name = line.split("=", 1)[0]
