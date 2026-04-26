@@ -82,13 +82,27 @@ async def find_existing_policy() -> dict[str, object] | None:
     return None
 
 
-async def ensure_mfa_policy() -> tuple[bool, str]:
-    """Ensure a Conditional Access policy requiring MFA for VM SSH exists.
+async def check_mfa_policy() -> tuple[bool, str | None]:
+    """Check whether a Conditional Access MFA policy exists for VM SSH.
 
-    Returns ``(success, message)`` — never raises.  If the signed-in user
-    lacks Conditional Access Administrator permissions the call will fail
-    gracefully with a descriptive message.
+    Returns ``(exists, policy_display_name | None)``.  Read-only — does
+    not attempt to create a policy and requires no elevated role.
     """
+    existing = await find_existing_policy()
+    if existing:
+        name = existing.get("displayName")
+        return True, str(name) if name else "unknown"
+    return False, None
+
+
+async def create_mfa_policy() -> tuple[bool, str]:
+    """Create a Conditional Access policy requiring MFA for VM SSH.
+
+    Returns ``(success, message)`` — never raises.  Requires the
+    signed-in user to hold **Conditional Access Administrator** or
+    **Global Administrator** in Entra ID.
+    """
+    # Pre-check: skip if already present.
     existing = await find_existing_policy()
     if existing:
         name = existing.get("displayName", "unknown")
