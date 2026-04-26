@@ -349,11 +349,21 @@ def _admin_callback(ctx: typer.Context) -> None:
 
 async def _run_mfa_setup() -> None:
     """Create the Conditional Access MFA policy for Azure Linux VM SSH."""
-    from board.azure.mfa import check_mfa_policy, create_mfa_policy
+    from board.azure.mfa import (
+        BOARD_GROUP_NAME,
+        add_member_to_board_group,
+        check_mfa_policy,
+        create_mfa_policy,
+        ensure_board_group,
+        get_signed_in_user_id,
+    )
 
     con.header("MFA Policy Setup")
     con.info("This creates a Conditional Access policy in Entra ID that")
-    con.info("requires MFA for all Azure Linux VM SSH sign-ins.")
+    con.info("requires MFA for Azure Linux VM SSH sign-ins.")
+    con.info("")
+    con.info(f"The policy is scoped to the '{BOARD_GROUP_NAME}' security group,")
+    con.info("so only members of that group are affected — not the whole tenant.")
     con.info("")
     con.warn("Requires: Conditional Access Administrator or Global Administrator role.")
     con.info("If using PIM, activate the role first then re-run this command.")
@@ -373,14 +383,47 @@ async def _run_mfa_setup() -> None:
         con.warn("Skipped. Run 'board admin mfa-setup' when ready.")
         return
 
+    # Ensure the security group exists for scoping the policy.
+    with con.spin(f"Finding or creating '{BOARD_GROUP_NAME}' security group..."):
+        group_id, group_msg = await ensure_board_group()
+
+    if not group_id:
+        con.error(group_msg)
+        con.info("Create the group manually in Entra ID, then re-run this command.")
+        raise typer.Exit(1)
+
+    con.success(group_msg)
+
     with con.spin("Creating Conditional Access MFA policy..."):
-        ok, msg = await create_mfa_policy()
+        ok, msg = await create_mfa_policy(group_id)
 
     if ok:
         con.success(msg)
+
+        # Add the current admin to the group.
+        with con.spin("Resolving your Entra ID identity..."):
+            my_id = await get_signed_in_user_id()
+        if my_id:
+            with con.spin(f"Adding you to '{BOARD_GROUP_NAME}'..."):
+                added, add_msg = await add_member_to_board_group(group_id, my_id)
+            if added:
+                con.success(add_msg)
+            else:
+                con.warn(add_msg)
+        else:
+            con.warn("Could not resolve your user ID — add yourself to the group manually.")
+
+        con.info("")
+        con.info(f"Add other users to '{BOARD_GROUP_NAME}' in Entra ID to enforce MFA for them.")
     else:
         con.error(msg)
-        if "Insufficient permissions" in msg:
+        if "licence" in msg.lower() or "licensed" in msg.lower():
+            con.info("")
+            con.info("To fix this:")
+            con.info("  1. Upgrade to Entra ID P1 (included in Microsoft 365 Business Premium)")
+            con.info("  2. Or enable Security Defaults as a free alternative:")
+            con.info("     Entra admin centre → Identity → Overview → Properties → Security Defaults")
+        elif "Insufficient permissions" in msg:
             con.info("")
             con.info("To fix this:")
             con.info("  1. Activate Conditional Access Administrator via PIM")

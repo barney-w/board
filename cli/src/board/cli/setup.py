@@ -710,12 +710,29 @@ async def _run_up(
 
     # ── Conditional Access: MFA for VM SSH ──
     if auth_method == "entra-id":
-        from board.azure.mfa import check_mfa_policy
+        from board.azure.mfa import (
+            add_member_to_board_group,
+            check_mfa_policy,
+            find_board_group,
+        )
 
         with con.spin("Checking MFA policy for Azure Linux VM SSH..."):
             mfa_exists, mfa_name = await check_mfa_policy()
         if mfa_exists:
             con.success(f"MFA policy active: {mfa_name}")
+
+            # Ensure the developer is in the Board VM Users group.
+            with con.spin("Checking Board VM Users group membership..."):
+                group_id = await find_board_group()
+            if group_id and dev_principal_id:
+                with con.spin("Adding developer to Board VM Users group..."):
+                    added, add_msg = await add_member_to_board_group(
+                        group_id, dev_principal_id
+                    )
+                if added:
+                    con.success(add_msg)
+                else:
+                    con.warn(add_msg)
         else:
             con.warn("No MFA Conditional Access policy found for Azure Linux VM SSH.")
             con.warn("A tenant admin should run: board admin mfa-setup")

@@ -53,7 +53,7 @@ REM Open the board pass in VS Code (triggers the import flow)
 echo   Opening your board pass in VS Code...
 code "%PASS%"
 echo.
-echo   VS Code should now be asking for your passphrase.
-echo   Enter the passphrase your team lead gave you.
+echo   VS Code is now importing your board pass.
+echo   For SSH-key boards, enter the passphrase your team lead gave you.
 echo.
 pause
