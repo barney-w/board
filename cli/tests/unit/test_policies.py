@@ -20,6 +20,7 @@ class TestPoliciesConfig:
         assert cfg.max_vms_per_user == 1
         assert cfg.max_vms_total == 20
         assert cfg.require_entra_auth is True
+        assert cfg.require_mfa is True
         assert "Standard_D2s_v6" in cfg.allowed_vm_sizes
         assert "australiaeast" in cfg.allowed_regions
 
@@ -56,9 +57,7 @@ class TestLoad:
 
     def test_load_from_file(self, tmp_path: Path) -> None:
         policies_file = tmp_path / "board.policies.yaml"
-        policies_file.write_text(
-            "max_vms_per_user: 2\nallowed_regions:\n  - westus2\n"
-        )
+        policies_file.write_text("max_vms_per_user: 2\nallowed_regions:\n  - westus2\n")
         cfg = pol.load(policies_file)
         assert cfg is not None
         assert cfg.max_vms_per_user == 2
@@ -99,9 +98,7 @@ class TestEnforce:
         with pytest.raises(PolicyViolationError, match="Region"):
             self._enforce(default_policies, region="westus2")
 
-    def test_ssh_key_blocked_when_entra_required(
-        self, default_policies: PoliciesConfig
-    ) -> None:
+    def test_ssh_key_blocked_when_entra_required(self, default_policies: PoliciesConfig) -> None:
         with pytest.raises(PolicyViolationError, match="Entra ID"):
             self._enforce(default_policies, auth_method="ssh-key")
 
@@ -110,9 +107,7 @@ class TestEnforce:
         warnings = self._enforce(cfg, auth_method="ssh-key")
         assert warnings == []
 
-    def test_multiple_violations_reported(
-        self, default_policies: PoliciesConfig
-    ) -> None:
+    def test_multiple_violations_reported(self, default_policies: PoliciesConfig) -> None:
         with pytest.raises(PolicyViolationError) as exc_info:
             self._enforce(
                 default_policies,
