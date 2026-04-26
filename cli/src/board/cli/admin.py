@@ -1,10 +1,13 @@
-"""board admin — interactive admin control panel."""
+"""board admin — interactive admin control panel and tenant admin commands."""
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
 
+import typer
+
+from board.cli import admin_app
 from board.core import config as cfg
 from board.core.errors import BoardError, SSHError
 from board.models.deployment import LlmConfig
@@ -307,6 +310,7 @@ async def _run_admin() -> None:
                 "Set up projects",
                 "Create a board pass",
                 "Manage Key Vault secrets",
+                "Set up MFA policy (requires CA Admin)",
                 "Run health checks",
                 "Exit",
             ],
@@ -321,6 +325,8 @@ async def _run_admin() -> None:
                 await _export_bundle_menu()
             elif "Key Vault" in action:
                 await _manage_secrets()
+            elif "MFA" in action:
+                await _run_mfa_setup()
             elif "health" in action:
                 await _health_checks()
             elif "Exit" in action:
@@ -331,6 +337,63 @@ async def _run_admin() -> None:
             con.error(str(exc))
 
 
-def admin_command() -> None:
+@admin_app.callback()
+def _admin_callback(ctx: typer.Context) -> None:
     """Open the admin control panel for managing boards."""
-    asyncio.run(_run_admin())
+    if ctx.invoked_subcommand is None:
+        asyncio.run(_run_admin())
+
+
+# ── board admin mfa-setup ──
+
+
+async def _run_mfa_setup() -> None:
+    """Create the Conditional Access MFA policy for Azure Linux VM SSH."""
+    from board.azure.mfa import check_mfa_policy, create_mfa_policy
+
+    con.header("MFA Policy Setup")
+    con.info("This creates a Conditional Access policy in Entra ID that")
+    con.info("requires MFA for all Azure Linux VM SSH sign-ins.")
+    con.info("")
+    con.warn("Requires: Conditional Access Administrator or Global Administrator role.")
+    con.info("If using PIM, activate the role first then re-run this command.")
+    con.info("")
+
+    # Check existing.
+    with con.spin("Checking for existing MFA policy..."):
+        exists, name = await check_mfa_policy()
+
+    if exists:
+        con.success(f"MFA policy already active: {name}")
+        con.info("Nothing to do.")
+        return
+
+    con.info("No MFA policy found for Azure Linux VM SSH.")
+    if not await prompts.confirm("Create the Conditional Access policy now?"):
+        con.warn("Skipped. Run 'board admin mfa-setup' when ready.")
+        return
+
+    with con.spin("Creating Conditional Access MFA policy..."):
+        ok, msg = await create_mfa_policy()
+
+    if ok:
+        con.success(msg)
+    else:
+        con.error(msg)
+        if "Insufficient permissions" in msg:
+            con.info("")
+            con.info("To fix this:")
+            con.info("  1. Activate Conditional Access Administrator via PIM")
+            con.info(
+                "     az rest --method POST --url "
+                "'https://graph.microsoft.com/v1.0/roleManagement/directory/"
+                "roleAssignmentScheduleRequests' ..."
+            )
+            con.info("  2. Or ask a Global Administrator to run: board admin mfa-setup")
+        raise typer.Exit(1)
+
+
+@admin_app.command(name="mfa-setup")
+def mfa_setup_command() -> None:
+    """Create the Conditional Access MFA policy for VM SSH (requires CA Admin role)."""
+    asyncio.run(_run_mfa_setup())
