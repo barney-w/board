@@ -226,7 +226,7 @@ async def _run_up(
         # Check if any selected project needs LLM env vars
         has_llm_projects = False
         try:
-            for m in manifests:  # type: ignore[possibly-undefined]
+            for m in manifests:
                 if m.env and m.env.keyvault_secrets:
                     for key in m.env.keyvault_secrets:
                         if "ANTHROPIC" in key or "OPENAI" in key:
@@ -295,7 +295,9 @@ async def _run_up(
     if auth_method == "entra-id":
         tenant_id_result = subprocess.run(
             ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if tenant_id_result.returncode != 0 or not tenant_id_result.stdout.strip():
             con.error("Could not resolve tenant ID. Ensure you are logged in with 'az login'.")
@@ -313,7 +315,9 @@ async def _run_up(
         if entra_self:
             principal_result = subprocess.run(
                 ["az", "ad", "signed-in-user", "show", "--query", "id", "-o", "tsv"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if principal_result.returncode != 0 or not principal_result.stdout.strip():
                 con.error("Could not resolve your Entra ID object ID.")
@@ -325,7 +329,9 @@ async def _run_up(
                 raise typer.Abort()
             principal_result = subprocess.run(
                 ["az", "ad", "user", "show", "--id", dev_email, "--query", "id", "-o", "tsv"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if principal_result.returncode != 0 or not principal_result.stdout.strip():
                 con.error(f"Could not find Entra ID user: {dev_email}")
@@ -475,8 +481,14 @@ async def _run_up(
 
     cost_compute = _cost_from_sku(vm_sku)
     auth_display = "Entra ID (tenant-locked)" if auth_method == "entra-id" else "SSH key"
-    auto_start_display = f"{auto_start_time[:2]}:{auto_start_time[2:]} AEST (weekdays)" if enable_auto_start else "disabled"
-    ssh_source_display = allowed_ssh_source_ip if allowed_ssh_source_ip != "*" else "* (any -- not recommended)"
+    auto_start_display = (
+        f"{auto_start_time[:2]}:{auto_start_time[2:]} AEST (weekdays)"
+        if enable_auto_start
+        else "disabled"
+    )
+    ssh_source_display = (
+        allowed_ssh_source_ip if allowed_ssh_source_ip != "*" else "* (any -- not recommended)"
+    )
     summary_lines = [
         f"Developer:     {dev_name}",
         f"Environment:   {environment}",
@@ -615,15 +627,25 @@ async def _run_up(
                     for secret_name, secret_value in llm_secrets.items():
                         result = subprocess.run(
                             [
-                                "az", "keyvault", "secret", "set",
-                                "--vault-name", kv_name,
-                                "--name", secret_name,
-                                "--value", secret_value,
+                                "az",
+                                "keyvault",
+                                "secret",
+                                "set",
+                                "--vault-name",
+                                kv_name,
+                                "--name",
+                                secret_name,
+                                "--value",
+                                secret_value,
                             ],
-                            capture_output=True, text=True, check=False,
+                            capture_output=True,
+                            text=True,
+                            check=False,
                         )
                         if result.returncode != 0:
-                            con.warn(f"Failed to set secret '{secret_name}': {result.stderr.strip()}")
+                            con.warn(
+                                f"Failed to set secret '{secret_name}': {result.stderr.strip()}"
+                            )
                         else:
                             con.success(f"Key Vault: {secret_name}")
         except Exception as exc:
@@ -682,6 +704,18 @@ async def _run_up(
     except DeploymentError as exc:
         con.error(str(exc))
         raise typer.Exit(1) from exc
+
+    # ── Conditional Access: MFA for VM SSH ──
+    if auth_method == "entra-id":
+        from board.azure.mfa import ensure_mfa_policy
+
+        with con.spin("Ensuring MFA policy for Azure Linux VM SSH..."):
+            mfa_ok, mfa_msg = await ensure_mfa_policy()
+        if mfa_ok:
+            con.success(mfa_msg)
+        else:
+            con.warn(mfa_msg)
+            provision_warnings.append(f"MFA: {mfa_msg}")
 
     # ── Cloud-init wait ──
     cloud_init_start = time.monotonic()
