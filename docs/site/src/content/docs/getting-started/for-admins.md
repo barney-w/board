@@ -45,7 +45,7 @@ The admin menu shows fleet status with coloured dots (green = running, grey = st
 just export-pass jbloggs
 ```
 
-Creates an encrypted starter kit zip with connection details, the VS Code extension, and a setup script. For Entra ID boards, the pass contains connection metadata only (no keys). For SSH key boards, it bundles the SSH private key. Send it to the developer with the passphrase via a separate channel (in person, phone, different messaging app).
+Creates a starter kit zip with connection details, the VS Code extension, and a setup script. For Entra ID boards, the pass is unencrypted (no passphrase needed) and contains connection metadata only (no keys). For SSH key boards, the pass is encrypted and bundles the SSH private key — share the passphrase via a separate channel (in person, phone, different messaging app).
 
 To force SSH key auth regardless of VM tag:
 

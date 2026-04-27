@@ -172,9 +172,7 @@ async def _run_export_pass(
     # Exclude empty strings and None to keep the envelope clean:
     # encrypted envelopes omit authMethod/payload, plaintext omit salt/iv/ciphertext/tag
     envelope_dict = {
-        k: v
-        for k, v in envelope.model_dump(by_alias=True).items()
-        if v not in ("", None)
+        k: v for k, v in envelope.model_dump(by_alias=True).items() if v not in ("", None)
     }
     pass_path.write_text(json.dumps(envelope_dict, indent=2))
 

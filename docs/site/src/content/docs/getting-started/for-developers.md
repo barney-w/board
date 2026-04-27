@@ -3,12 +3,12 @@ title: For Developers
 description: Connect to your cloud dev environment and start coding.
 ---
 
-Your admin gives you a zip file and a passphrase. Everything else is automatic.
+Your admin gives you a zip file. Everything else is automatic.
 
 ## Connect
 
 1. Unzip the folder and double-click **Setup Board** (`.command` on Mac, `.cmd` on Windows)
-2. VS Code opens and asks for your passphrase — enter it
+2. VS Code imports your board pass automatically. For SSH-key boards, you'll be asked for a passphrase — enter the one your admin gave you. Entra ID boards need no passphrase.
 3. If your board uses **Entra ID** auth, ensure you have [Azure CLI](https://aka.ms/installazurecli) installed and run `az login` in your terminal first
 4. Your Board Pass card appears — click **Connect Now**
 

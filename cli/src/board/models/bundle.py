@@ -91,4 +91,4 @@ class BundleEnvelope(BaseModel):
     tag: str = ""
     # Plaintext envelope fields (entra-id auth)
     auth_method: str = ""
-    payload: dict | None = None
+    payload: dict[str, str] | None = None

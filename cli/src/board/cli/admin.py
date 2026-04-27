@@ -422,7 +422,9 @@ async def _run_mfa_setup() -> None:
             con.info("To fix this:")
             con.info("  1. Upgrade to Entra ID P1 (included in Microsoft 365 Business Premium)")
             con.info("  2. Or enable Security Defaults as a free alternative:")
-            con.info("     Entra admin centre → Identity → Overview → Properties → Security Defaults")
+            con.info(
+                "     Entra admin centre → Identity → Overview → Properties → Security Defaults"
+            )
         elif "Insufficient permissions" in msg:
             con.info("")
             con.info("To fix this:")

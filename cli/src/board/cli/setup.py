@@ -726,9 +726,7 @@ async def _run_up(
                 group_id = await find_board_group()
             if group_id and dev_principal_id:
                 with con.spin("Adding developer to Board VM Users group..."):
-                    added, add_msg = await add_member_to_board_group(
-                        group_id, dev_principal_id
-                    )
+                    added, add_msg = await add_member_to_board_group(group_id, dev_principal_id)
                 if added:
                     con.success(add_msg)
                 else:

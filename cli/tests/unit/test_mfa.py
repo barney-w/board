@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from board.azure.mfa import (
-    BOARD_GROUP_NAME,
     _POLICY_DISPLAY_NAME,
+    BOARD_GROUP_NAME,
     _resolve_vm_signin_app_id,
     add_member_to_board_group,
     check_mfa_policy,
