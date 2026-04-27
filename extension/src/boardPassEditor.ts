@@ -129,7 +129,7 @@ function getLoadingHtml(): string {
 <body>
   <div class="msg">
     <div class="spinner"></div>
-    <p>Enter the passphrase in the dialog above to import your board pass.</p>
+    <p>Importing your board pass...</p>
   </div>
 </body>
 </html>`;
