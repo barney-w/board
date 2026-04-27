@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { decryptBundle, type BundlePayload } from '../src/bundle';
+import { decryptBundle, isBundlePlaintext, type BundlePayload } from '../src/bundle';
 
 /** Encrypt a payload to match the format produced by export-bundle.sh */
 function encryptBundle(payload: object, passphrase: string): string {
@@ -24,7 +24,17 @@ function encryptBundle(payload: object, passphrase: string): string {
   });
 }
 
-/** Sample bundle payload */
+/** Create a plaintext Entra ID envelope */
+function plaintextBundle(payload: object): string {
+  return JSON.stringify({
+    version: 2,
+    format: 'board-pass',
+    authMethod: 'entra-id',
+    payload,
+  });
+}
+
+/** Sample SSH-key bundle payload */
 const samplePayload: BundlePayload = {
   developerName: 'testuser',
   environment: 'personal',
@@ -35,6 +45,21 @@ const samplePayload: BundlePayload = {
   authMethod: 'ssh-key',
   sshPrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nfake-key-content\n-----END OPENSSH PRIVATE KEY-----',
   sshPublicKey: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@devvm',
+  resourceGroup: 'rg-personal-aue-devvm',
+  vmName: 'vm-personal-aue-devvm-testuser',
+};
+
+/** Sample Entra ID bundle payload */
+const entraPayload: BundlePayload = {
+  developerName: 'testuser',
+  environment: 'personal',
+  region: 'australiaeast',
+  regionShort: 'aue',
+  hostname: 'devvm-testuser.australiaeast.cloudapp.azure.com',
+  username: 'devuser',
+  authMethod: 'entra-id',
+  sshPrivateKey: '',
+  sshPublicKey: '',
   resourceGroup: 'rg-personal-aue-devvm',
   vmName: 'vm-personal-aue-devvm-testuser',
 };
@@ -95,5 +120,48 @@ describe('bundle encrypt/decrypt round-trip', () => {
     const result = await decryptBundle(bundlePath, passphrase);
 
     expect(result).toEqual(samplePayload);
+  });
+});
+
+describe('Entra ID plaintext bundle', () => {
+  it('imports without passphrase', async () => {
+    const bundle = plaintextBundle(entraPayload);
+    const bundlePath = writeTempBundle(bundle, 'entra.board-pass');
+
+    const result = await decryptBundle(bundlePath);
+
+    expect(result.developerName).toBe('testuser');
+    expect(result.authMethod).toBe('entra-id');
+    expect(result.sshPrivateKey).toBe('');
+  });
+
+  it('isBundlePlaintext returns true for Entra ID bundles', async () => {
+    const bundle = plaintextBundle(entraPayload);
+    const bundlePath = writeTempBundle(bundle, 'entra-check.board-pass');
+
+    expect(await isBundlePlaintext(bundlePath)).toBe(true);
+  });
+
+  it('isBundlePlaintext returns false for encrypted bundles', async () => {
+    const encrypted = encryptBundle(samplePayload, passphrase);
+    const bundlePath = writeTempBundle(encrypted, 'encrypted-check.board-pass');
+
+    expect(await isBundlePlaintext(bundlePath)).toBe(false);
+  });
+
+  it('payload fields match input exactly', async () => {
+    const bundle = plaintextBundle(entraPayload);
+    const bundlePath = writeTempBundle(bundle, 'entra-fields.board-pass');
+
+    const result = await decryptBundle(bundlePath);
+
+    expect(result).toEqual(entraPayload);
+  });
+
+  it('throws for encrypted bundle without passphrase', async () => {
+    const encrypted = encryptBundle(samplePayload, passphrase);
+    const bundlePath = writeTempBundle(encrypted, 'no-pass.board-pass');
+
+    await expect(decryptBundle(bundlePath)).rejects.toThrow('Passphrase required');
   });
 });
