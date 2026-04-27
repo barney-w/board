@@ -37,19 +37,30 @@ export interface BundlePayload {
 interface BundleEnvelope {
   version: number;
   format: string;
-  salt: string;
-  iv: string;
-  ciphertext: string;
-  tag: string;
+  // Encrypted envelope fields (ssh-key auth)
+  salt?: string;
+  iv?: string;
+  ciphertext?: string;
+  tag?: string;
+  // Plaintext envelope fields (entra-id auth)
+  authMethod?: 'ssh-key' | 'entra-id';
+  payload?: BundlePayload;
 }
 
 /**
- * Decrypt a bundle file using the given passphrase.
- * Uses Node.js built-in `crypto` module (AES-256-GCM, PBKDF2).
+ * Check whether an envelope is plaintext (Entra ID, no encryption).
+ */
+function isPlaintextEnvelope(envelope: BundleEnvelope): boolean {
+  return envelope.authMethod === 'entra-id' && envelope.payload != null;
+}
+
+/**
+ * Read a bundle file. Returns the payload directly for plaintext (Entra ID)
+ * envelopes, or decrypts with the given passphrase for encrypted (SSH-key) ones.
  */
 export async function decryptBundle(
   bundlePath: string,
-  passphrase: string,
+  passphrase?: string,
 ): Promise<BundlePayload> {
   const raw = await fs.readFile(bundlePath, 'utf-8');
   const envelope: BundleEnvelope = JSON.parse(raw);
@@ -62,11 +73,21 @@ export async function decryptBundle(
     throw new Error(`Unsupported bundle format: ${envelope.format}`);
   }
 
+  // Plaintext Entra ID envelope — no decryption needed
+  if (isPlaintextEnvelope(envelope)) {
+    return envelope.payload!;
+  }
+
+  // Encrypted SSH-key envelope — passphrase required
+  if (!passphrase) {
+    throw new Error('Passphrase required for SSH-key bundles');
+  }
+
   // Decode fields
-  const salt = Buffer.from(envelope.salt, 'base64');
-  const iv = Buffer.from(envelope.iv, 'base64');
-  const ciphertext = Buffer.from(envelope.ciphertext, 'base64');
-  const tag = Buffer.from(envelope.tag, 'base64');
+  const salt = Buffer.from(envelope.salt!, 'base64');
+  const iv = Buffer.from(envelope.iv!, 'base64');
+  const ciphertext = Buffer.from(envelope.ciphertext!, 'base64');
+  const tag = Buffer.from(envelope.tag!, 'base64');
 
   // Derive key via PBKDF2
   const key = crypto.pbkdf2Sync(passphrase, salt, 100_000, 32, 'sha256');
@@ -81,6 +102,16 @@ export async function decryptBundle(
   ]);
 
   return JSON.parse(decrypted.toString('utf-8')) as BundlePayload;
+}
+
+/**
+ * Check whether a bundle file is a plaintext (Entra ID) envelope.
+ * Used by importBundle to skip the passphrase prompt.
+ */
+export async function isBundlePlaintext(bundlePath: string): Promise<boolean> {
+  const raw = await fs.readFile(bundlePath, 'utf-8');
+  const envelope: BundleEnvelope = JSON.parse(raw);
+  return isPlaintextEnvelope(envelope);
 }
 
 /**
@@ -125,31 +156,38 @@ export async function importBundle(
 
   // 2-3. Read and validate (done inside decryptBundle)
 
-  // 4-6. Prompt for passphrase and decrypt (with retry loop)
+  // 4-6. Decrypt: plaintext (Entra ID) skips passphrase, encrypted (SSH-key) prompts
   let payload: BundlePayload | undefined;
 
-  while (!payload) {
-    const passphrase = await vscode.window.showInputBox({
-      prompt: 'Enter the passphrase for this bundle',
-      password: true,
-      ignoreFocusOut: true,
-    });
+  const plaintext = await isBundlePlaintext(bundlePath);
+  if (plaintext) {
+    // Entra ID bundle — no passphrase needed
+    payload = await decryptBundle(bundlePath);
+  } else {
+    // SSH-key bundle — prompt for passphrase with retry loop
+    while (!payload) {
+      const passphrase = await vscode.window.showInputBox({
+        prompt: 'Enter the passphrase for this bundle',
+        password: true,
+        ignoreFocusOut: true,
+      });
 
-    if (passphrase === undefined) {
-      return; // User cancelled
-    }
+      if (passphrase === undefined) {
+        return; // User cancelled
+      }
 
-    try {
-      payload = await decryptBundle(bundlePath, passphrase);
-    } catch (err) {
-      // GCM auth failure or other crypto error -> treat as bad passphrase
-      const retry = await vscode.window.showErrorMessage(
-        'Invalid passphrase. Please try again.',
-        'Retry',
-        'Cancel',
-      );
-      if (retry !== 'Retry') {
-        return;
+      try {
+        payload = await decryptBundle(bundlePath, passphrase);
+      } catch (err) {
+        // GCM auth failure or other crypto error -> treat as bad passphrase
+        const retry = await vscode.window.showErrorMessage(
+          'Invalid passphrase. Please try again.',
+          'Retry',
+          'Cancel',
+        );
+        if (retry !== 'Retry') {
+          return;
+        }
       }
     }
   }

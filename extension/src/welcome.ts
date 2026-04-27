@@ -146,11 +146,11 @@ function getWelcomeHtml(): string {
         <ol class="steps">
             <li>
                 <span class="step-number">1</span>
-                <span class="step-text"><strong>Get your board pass</strong> — a <code>.board-pass</code> file and a passphrase from your admin.</span>
+                <span class="step-text"><strong>Get your board pass</strong> — a <code>.board-pass</code> file from your admin.</span>
             </li>
             <li>
                 <span class="step-number">2</span>
-                <span class="step-text"><strong>Click Import Pass</strong> below, select the file, and enter the passphrase.</span>
+                <span class="step-text"><strong>Click Import Pass</strong> below and select the file.</span>
             </li>
             <li>
                 <span class="step-number">3</span>
