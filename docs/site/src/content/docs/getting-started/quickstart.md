@@ -25,8 +25,8 @@ The interactive wizard walks you through Azure login, naming the environment, se
 just export-pass jbloggs
 ```
 
-This creates an encrypted starter kit zip containing a `.board-pass` file, the VS Code extension VSIX, a setup script, and a quick-start guide. Send it to the developer with the passphrase via a separate channel.
+This creates a starter kit zip containing a `.board-pass` file, the VS Code extension VSIX, a setup script, and a quick-start guide. For Entra ID boards, just send the zip — no passphrase needed. For SSH-key boards, share the passphrase via a separate channel.
 
 ## Developer connects
 
-The developer unzips, double-clicks **Setup Board**, enters the passphrase, and clicks **Connect**. See [For Developers](/board/getting-started/for-developers/) for their full guide.
+The developer unzips, double-clicks **Setup Board**, and clicks **Connect**. For SSH-key boards, they'll be prompted for the passphrase. See [For Developers](/board/getting-started/for-developers/) for their full guide.

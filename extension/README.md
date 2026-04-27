@@ -8,9 +8,9 @@ One-click connection to your Board cloud dev environment.
 
 ## Quick Start
 
-Your admin sent you a **`.board-pass`** file and a **passphrase**.
+Your admin sent you a **`.board-pass`** file.
 
-1. **Cmd+Shift+P** > `Board: Import Pass` > select the file > enter the passphrase
+1. **Cmd+Shift+P** > `Board: Import Pass` > select the file (SSH-key boards will ask for a passphrase)
 2. Click **Connect Now** on the board pass card
 3. You're coding on your cloud VM
 

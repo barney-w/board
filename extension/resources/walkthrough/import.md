@@ -1,11 +1,12 @@
 # Import Your Board Pass
 
-Your admin created a board for you and sent you two things:
+Your admin created a board for you and sent you a **`.board-pass`** file.
 
-1. A **`.board-pass` file** — your encrypted connection bundle
-2. A **passphrase** — shared separately (ask your admin if you don't have it)
+For **Entra ID** boards (default), no passphrase is needed — just select the file and you're connected.
 
-Click **Import Pass** above, select the file, enter the passphrase, and you're connected.
+For **SSH-key** boards, you'll also receive a **passphrase** separately (ask your admin if you don't have it).
+
+Click **Import Pass** above, select the file, and you're connected.
 
 **That's it.** The extension handles SSH keys, config files, and connection settings automatically.
 

@@ -29,13 +29,13 @@
 
 ## Get Connected
 
-You've been given a zip file and a passphrase. Here's what happens next.
+You've been given a zip file. Here's what happens next.
 
 <table>
 <tr><td width="40" align="center"><strong>1</strong></td>
 <td><strong>Double-click "Setup Board"</strong> — Unzip the folder. Double-click <code>Setup Board</code> (<code>.command</code> on Mac, <code>.cmd</code> on Windows). It installs the VS Code extension and opens your board pass. That's it — no terminal, no commands.</td></tr>
 <tr><td width="40" align="center"><strong>2</strong></td>
-<td><strong>Enter your passphrase</strong> — VS Code asks for the passphrase your admin gave you. This decrypts your connection details and configures everything automatically. (For Entra ID boards, ensure <a href="https://aka.ms/installazurecli">Azure CLI</a> is installed and run <code>az login</code> first.)</td></tr>
+<td><strong>Board pass imports automatically</strong> — For Entra ID boards (default), no passphrase needed. For SSH-key boards, VS Code asks for the passphrase your admin gave you. (For Entra ID boards, ensure <a href="https://aka.ms/installazurecli">Azure CLI</a> is installed and run <code>az login</code> first.)</td></tr>
 <tr><td width="40" align="center"><strong>3</strong></td>
 <td><strong>Click Connect</strong> — Your Board Pass card appears. Click <strong>Connect Now</strong> and you're coding on your cloud VM. VS Code opens a remote window — the file explorer, terminal, and extensions all run on the VM.</td></tr>
 </table>
@@ -55,7 +55,7 @@ Your admin gives you a single zip file containing everything you need:
   <img src="docs/assets/starter-kit.svg" alt="Starter kit contents — board.vsix, .board-pass, Setup Board script, Quick Start PDF" width="680">
 </p>
 
-The passphrase comes separately (in person, by text, however your team shares secrets). Two-channel delivery means the zip file is useless without the passphrase and vice versa.
+For SSH-key boards, the passphrase comes separately (in person, by text, however your team shares secrets). Two-channel delivery means the zip file is useless without the passphrase and vice versa. For Entra ID boards (default), no passphrase is needed — authentication happens through Azure AD.
 
 ---
 
@@ -119,10 +119,10 @@ The wizard walks you through developer name, environment, project selection, VM 
 ### Export a board pass
 
 ```bash
-just export-pass jbloggs   # encrypted credential bundle + starter kit zip
+just export-pass jbloggs   # credential bundle + starter kit zip
 ```
 
-This creates the zip file containing the VS Code extension, encrypted board pass, setup scripts, and Quick Start PDF. Share the zip by email or file transfer; share the passphrase by a separate channel.
+This creates the zip file containing the VS Code extension, board pass, setup scripts, and Quick Start PDF. For Entra ID boards, just share the zip. For SSH-key boards, also share the passphrase via a separate channel.
 
 ### Manage the fleet
 
