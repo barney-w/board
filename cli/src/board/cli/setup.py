@@ -225,17 +225,22 @@ async def _run_up(
 
     # Key Vault
     if selected_projects:
-        all_kv_secrets: set[str] = set()
         from board.core.manifest import load_all as load_manifests
+        from board.core.manifest import required_keyvault_secrets
 
         manifests = load_manifests(manifest_dir, filter_names=selected_projects)
-        for m in manifests:
-            if m.env and m.env.keyvault_secrets:
-                all_kv_secrets.update(m.env.keyvault_secrets.values())
+        env_kv_secrets, repo_auth_kv_secrets = required_keyvault_secrets(manifests)
+        all_kv_secrets = env_kv_secrets | repo_auth_kv_secrets
 
         if all_kv_secrets and not non_interactive:
+            reasons: list[str] = []
+            if repo_auth_kv_secrets:
+                reasons.append("clone private repos (token in Key Vault)")
+            if env_kv_secrets:
+                reasons.append("populate runtime env vars from Key Vault")
+            reason_text = " and to ".join(reasons)
             kv_choice = await prompts.choose(
-                "These projects use secrets from Key Vault:",
+                f"These projects need a Key Vault to {reason_text}:",
                 ["Use existing Key Vault", "Create new Key Vault", "Skip for now"],
             )
             if "existing" in kv_choice:
@@ -248,6 +253,11 @@ async def _run_up(
                 create_kv = True
             else:
                 con.info("Secrets can be added later with: board admin")
+                if repo_auth_kv_secrets:
+                    con.warn(
+                        "Repo clones requiring Key Vault auth will fail until "
+                        "a Key Vault is configured."
+                    )
 
     # LLM provider
     llm_config = LlmConfig()
@@ -744,8 +754,36 @@ async def _run_up(
             con.warn(f"Could not resolve security group: {group_msg}")
             con.warn(f"Falling back to individual user RBAC for {dev_principal_id[:8]}...")
 
-    # Bicep deployment
+    # ── Shared network (one vnet + subnet per RG) ──
+    from board.azure.deployment import ensure_network
+
+    rg_name_for_prefix = deploy_cfg.resource_group
+    prefix = rg_name_for_prefix[3:] if rg_name_for_prefix.startswith("rg-") else rg_name_for_prefix
+    network_tags: dict[str, str] = {
+        "project": "devvm",
+        "managed-by": "bicep",
+        **extra_tags,
+    }
     infra_dir = cfg._find_infra_dir()
+    network_bicep = infra_dir / "modules" / "network.bicep"
+
+    try:
+        with con.spin(f"Ensuring shared network for '{deploy_cfg.resource_group}'..."):
+            _vnet_id, _subnet_id = await ensure_network(
+                credential,
+                sub_id,
+                deploy_cfg.resource_group,
+                prefix,
+                location,
+                network_tags,
+                network_bicep,
+            )
+        con.success(f"Network: vnet-{prefix} ready (subnet snet-{prefix})")
+    except (BoardError, DeploymentError) as exc:
+        con.error(str(exc))
+        raise typer.Exit(1) from exc
+
+    # Bicep deployment
     bicep_file = infra_dir / "main.bicep"
     deploy_params = {
         "developerName": dev_name,
