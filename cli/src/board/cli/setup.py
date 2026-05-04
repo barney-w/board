@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ import typer
 
 from board.core import config as cfg
 from board.core import policies as pol
+from board.core import tags as tag_loader
 from board.core.errors import BoardError, DeploymentError, PolicyViolationError, SSHError
 from board.models.deployment import DeploymentConfig, LlmConfig
 from board.ui import console as con
@@ -25,21 +27,11 @@ VM_SIZE_CATALOG = [
     {"sku": "Standard_D8s_v6", "label": "Standard_D8s_v6  -- 8 vCPU, 32 GB RAM", "cost": "~220"},
 ]
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
+# Azure resource group naming: 1-90 chars, alphanumerics / underscore / parens
+# / hyphen / period (no trailing period).
+RG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_().-]{1,89}[A-Za-z0-9_()-]$")
+
 TOTAL_STEPS = 5
-
-
-def _resolve_location(location: str) -> str:
-    return location or os.environ.get("BOARD_LOCATION", DEFAULT_LOCATION)
-
-
-def _resolve_region_short(region_short: str) -> str:
-    return region_short or os.environ.get("BOARD_REGION_SHORT", DEFAULT_REGION)
-
-
-def _resolve_env(env: str) -> str:
-    return env or os.environ.get("BOARD_ENVIRONMENT", "")
 
 
 def _vm_size_options() -> list[str]:
@@ -94,19 +86,23 @@ def _find_manifest_dir() -> Path:
 
 async def _run_up(
     dry_run: bool,
-    demo: bool,
     non_interactive: bool,
-    env: str,
-    location: str,
-    region_short: str,
+    rg_arg: str,
+    preset_path: str,
 ) -> None:
     """Async implementation of the up command."""
-    location = _resolve_location(location)
-    region_short = _resolve_region_short(region_short)
-    env_override = _resolve_env(env)
-
     if non_interactive:
         os.environ["BOARD_NON_INTERACTIVE"] = "1"
+
+    # Load preset (if any) so we can pre-fill the wizard prompts.
+    preset: dict[str, str] = {}
+    if preset_path:
+        try:
+            preset = cfg.load_preset(Path(preset_path))
+        except FileNotFoundError as exc:
+            con.error(str(exc))
+            raise typer.Exit(1) from exc
+        con.info(f"Preset: {preset_path} ({len(preset)} value(s) loaded)")
 
     # ══════════════════════════════════════════════════
     # [1/5] Configure
@@ -138,29 +134,63 @@ async def _run_up(
             message="Must be lowercase, start with a letter, alphanumeric only, max 12 chars",
         )
 
-    # Environment
-    bicepparams = cfg.discover_bicepparams()
-    env_names = [name for name, _ in bicepparams]
-
-    if env_override and env_override in env_names:
-        environment = env_override
-        con.info(f"Environment: {environment}")
-    elif len(env_names) == 1:
-        environment = env_names[0]
-        con.info(f"Environment: {environment}")
-    elif env_names:
-        environment = await prompts.choose("Environment:", env_names)
+    # ── Resource group (required input — must already exist) ──
+    rg_default = rg_arg or preset.get("resourceGroup", "")
+    if non_interactive:
+        if not rg_default:
+            con.error(
+                "Resource group is required in non-interactive mode. "
+                "Pass --rg or set 'resourceGroup' in the preset."
+            )
+            raise typer.Exit(1)
+        rg_name = rg_default
+        con.success(f"Resource group: {rg_name}")
     else:
-        environment = "personal"
-        con.info(f"Environment: {environment} (no bicepparam files found)")
+        rg_name = await prompts.input_validated(
+            "Resource group (must already exist)",
+            default=rg_default,
+            pattern=RG_NAME_PATTERN.pattern,
+            message="Invalid Azure resource group name (1-90 chars, alphanumerics/_-.()).",
+        )
 
-    # Derived names
+    # Resolve credential + caller principal up front so we can verify the RG.
+    if dry_run:
+        # Skip the live verify in dry run; trust the inputs.
+        location = preset.get("location", "")
+        con.success(f"Resource group: {rg_name} (verification skipped in dry run)")
+    else:
+        from board.azure.auth import get_credential, get_subscription_id
+        from board.azure.deployment import verify_resource_group
+        from board.azure.mfa import get_signed_in_user_id
+
+        credential_for_check = get_credential()
+        try:
+            sub_id_for_check = await get_subscription_id()
+        except RuntimeError as exc:
+            con.error(str(exc))
+            con.info("Run: az login")
+            raise typer.Exit(1) from exc
+
+        principal_id_for_check = await get_signed_in_user_id() or ""
+        with con.spin(f"Verifying access to resource group '{rg_name}'..."):
+            try:
+                location, _rg_tags = await verify_resource_group(
+                    credential_for_check,
+                    sub_id_for_check,
+                    rg_name,
+                    principal_id_for_check,
+                )
+            except BoardError as exc:
+                con.error(str(exc))
+                raise typer.Exit(1) from exc
+        con.success(f"Resource group: {rg_name} ({location}, Contributor verified)")
+
     deploy_cfg = DeploymentConfig(
         developer_name=dev_name,
-        environment=environment,
-        region=location,
-        region_short=region_short,
+        resource_group=rg_name,
+        location=location,
     )
+    con.info(f"VM name: {deploy_cfg.vm_name}")
 
     # Project selection
     manifest_dir = _find_manifest_dir()
@@ -276,6 +306,46 @@ async def _run_up(
 
             else:
                 con.info("LLM credentials can be added later with: board admin")
+
+    # Extra tags
+    extra_tags: dict[str, str] = {}
+    tags_path = tag_loader.find_tags_file()
+    apply_extra_tags = False
+    if non_interactive:
+        if tags_path is not None:
+            extra_tags = tag_loader.load_tags(tags_path)
+            apply_extra_tags = bool(extra_tags)
+            if apply_extra_tags:
+                con.success(f"Loaded {len(extra_tags)} tag(s) from {tags_path.name}")
+    else:
+        apply_extra_tags = await prompts.confirm(
+            "Include extra tags? (yes: load all from board.tags.yaml, no: skip)",
+            default=True,
+        )
+        if apply_extra_tags:
+            if tags_path is None:
+                example = tag_loader.find_example_file()
+                con.error(f"{tag_loader.TAGS_FILENAME} not found.")
+                if example is not None:
+                    con.info(
+                        f"Copy {example.name} to {tag_loader.TAGS_FILENAME}, "
+                        "fill in your values, then re-run."
+                    )
+                else:
+                    con.info(
+                        f"Create {tag_loader.TAGS_FILENAME} at the repo root with a top-level "
+                        "'tags:' map, then re-run."
+                    )
+                raise typer.Abort()
+            extra_tags = tag_loader.load_tags(tags_path)
+            if not extra_tags:
+                con.error(f"{tags_path.name} contains no tags under the top-level 'tags:' key.")
+                raise typer.Abort()
+            con.success(f"Loaded {len(extra_tags)} tag(s) from {tags_path.name}")
+            for k, v in extra_tags.items():
+                con.info(f"    {k}: {v}")
+        else:
+            con.warn("Skipping extra tags -- deploy will fail if Azure Policy requires them")
 
     # Authentication method
     auth_method = await prompts.choose(
@@ -491,7 +561,8 @@ async def _run_up(
     )
     summary_lines = [
         f"Developer:     {dev_name}",
-        f"Environment:   {environment}",
+        f"Resource group: {deploy_cfg.resource_group}",
+        f"VM name:        {deploy_cfg.vm_name}",
         f"Auth:          {auth_display}",
         f"VM Size:       {vm_sku}",
         f"Region:        {location}",
@@ -504,9 +575,6 @@ async def _run_up(
         "Estimated monthly cost:",
         f"  Compute (with auto-shutdown): {cost_compute}",
         "  Disk + Public IP:             ~$24",
-        "",
-        f"Resource group: {deploy_cfg.resource_group}",
-        f"VM name:        {deploy_cfg.vm_name}",
     ]
     if selected_projects:
         summary_lines.append(f"Projects:       {' '.join(selected_projects)}")
@@ -561,28 +629,16 @@ async def _run_up(
         raise typer.Exit(0)
 
     # ── Infrastructure ──
+    # The RG was already verified in step 1 — we just deploy into it. Tags on
+    # the RG itself are owned by whoever provisioned it, not board.
     phase_start = time.monotonic()
     provision_warnings: list[str] = []
 
     from board.azure.auth import get_credential, get_subscription_id
-    from board.azure.deployment import deploy, ensure_resource_group
+    from board.azure.deployment import deploy
 
     credential = get_credential()
     sub_id = await get_subscription_id()
-
-    try:
-        with con.spin("Creating resource group..."):
-            await ensure_resource_group(
-                credential,
-                sub_id,
-                deploy_cfg.resource_group,
-                location,
-                tags={"project": "devvm", "environment": environment, "managed-by": "board-cli"},
-            )
-        con.success(f"Resource group: {deploy_cfg.resource_group}")
-    except DeploymentError as exc:
-        con.error(str(exc))
-        raise typer.Exit(1) from exc
 
     # Key Vault creation
     kv_resource_id = ""
@@ -609,48 +665,84 @@ async def _run_up(
             )
             con.success(f"Key Vault: {kv_name}")
         except BoardError as exc:
-            con.warn(f"Key Vault creation issue: {exc}")
-            provision_warnings.append(f"Key Vault: {exc}")
+            con.error(f"Key Vault creation failed: {exc}")
+            con.info(
+                f"Confirm you have 'Contributor' (or equivalent) on resource group "
+                f"'{deploy_cfg.resource_group}' and re-run setup."
+            )
+            raise typer.Exit(1) from exc
 
     # Auto-populate Key Vault with LLM credentials
-    if kv_name and llm_config.provider != "none":
-        try:
-            llm_secrets: dict[str, str] = {}
-            if llm_config.provider == "foundry" and llm_config.api_key and llm_config.endpoint:
-                llm_secrets["anthropic-foundry-api-key"] = llm_config.api_key
-                llm_secrets["azure-openai-endpoint"] = llm_config.endpoint
-            elif llm_config.provider == "anthropic" and llm_config.api_key:
-                llm_secrets["anthropic-api-key"] = llm_config.api_key
+    if kv_name and kv_resource_id and llm_config.provider != "none":
+        llm_secrets: dict[str, str] = {}
+        if llm_config.provider == "foundry" and llm_config.api_key and llm_config.endpoint:
+            llm_secrets["anthropic-foundry-api-key"] = llm_config.api_key
+            llm_secrets["azure-openai-endpoint"] = llm_config.endpoint
+        elif llm_config.provider == "anthropic" and llm_config.api_key:
+            llm_secrets["anthropic-api-key"] = llm_config.api_key
 
-            if llm_secrets:
-                with con.spin("Storing LLM credentials in Key Vault..."):
-                    for secret_name, secret_value in llm_secrets.items():
-                        result = subprocess.run(
-                            [
-                                "az",
-                                "keyvault",
-                                "secret",
-                                "set",
-                                "--vault-name",
-                                kv_name,
-                                "--name",
-                                secret_name,
-                                "--value",
-                                secret_value,
-                            ],
-                            capture_output=True,
-                            text=True,
-                            check=False,
+        if llm_secrets:
+            from board.azure.keyvault import (
+                ensure_secrets_officer_role,
+                set_secret_with_propagation_retry,
+            )
+            from board.azure.mfa import get_signed_in_user_id
+
+            runner_id = await get_signed_in_user_id()
+            if not runner_id:
+                con.error(
+                    "Cannot store LLM credentials: failed to resolve the "
+                    "currently signed-in Entra ID user. Run 'az login' as a "
+                    "user account (not a service principal) and re-run setup."
+                )
+                raise typer.Exit(1)
+
+            try:
+                with con.spin(
+                    f"Granting 'Key Vault Secrets Officer' on {kv_name} to current user..."
+                ):
+                    await ensure_secrets_officer_role(credential, sub_id, kv_resource_id, runner_id)
+            except BoardError as exc:
+                con.error(str(exc))
+                con.info(
+                    "Your account needs 'Microsoft.Authorization/roleAssignments/write' "
+                    f"on '{kv_name}' (e.g. 'Owner' or 'User Access Administrator' on the "
+                    f"resource group). Ask a subscription admin to grant it, or assign "
+                    f"yourself 'Key Vault Secrets Officer' on the vault, then re-run setup."
+                )
+                raise typer.Exit(1) from exc
+
+            vault_url = f"https://{kv_name}.vault.azure.net/"
+            with con.spin("Storing LLM credentials in Key Vault..."):
+                for secret_name, secret_value in llm_secrets.items():
+                    try:
+                        await set_secret_with_propagation_retry(
+                            vault_url, credential, secret_name, secret_value
                         )
-                        if result.returncode != 0:
-                            con.warn(
-                                f"Failed to set secret '{secret_name}': {result.stderr.strip()}"
-                            )
-                        else:
-                            con.success(f"Key Vault: {secret_name}")
-        except Exception as exc:
-            con.warn(f"Could not store LLM credentials in Key Vault: {exc}")
-            provision_warnings.append(f"LLM Key Vault: {exc}")
+                    except BoardError as exc:
+                        con.error(str(exc))
+                        raise typer.Exit(1) from exc
+                    con.success(f"Key Vault: {secret_name}")
+
+    # ── Resolve security group for VM RBAC (Entra ID only) ──
+    rbac_principal_id = dev_principal_id
+    rbac_principal_type = "User"
+    security_group_name = policies.security_group_name if policies is not None else "Board VM Users"
+    login_group_id: str | None = None
+
+    if auth_method == "entra-id":
+        from board.azure.mfa import ensure_board_group
+
+        with con.spin(f"Resolving security group '{security_group_name}'..."):
+            login_group_id, group_msg = await ensure_board_group(security_group_name)
+
+        if login_group_id:
+            con.success(group_msg)
+            rbac_principal_id = login_group_id
+            rbac_principal_type = "Group"
+        else:
+            con.warn(f"Could not resolve security group: {group_msg}")
+            con.warn(f"Falling back to individual user RBAC for {dev_principal_id[:8]}...")
 
     # Bicep deployment
     infra_dir = cfg._find_infra_dir()
@@ -659,7 +751,6 @@ async def _run_up(
         "developerName": dev_name,
         "vmSku": vm_sku,
         "adminSshPublicKey": ssh_pub_key,
-        "environment": environment,
         "useEntraIdLogin": auth_method == "entra-id",
         "allowedSshSourceIP": allowed_ssh_source_ip,
         "enableAutoStart": enable_auto_start,
@@ -671,9 +762,12 @@ async def _run_up(
         deploy_params["autoStartTime"] = auto_start_time
     if auth_method == "entra-id":
         deploy_params["entraLoginTenantId"] = tenant_id
-        deploy_params["entraLoginPrincipalId"] = dev_principal_id
+        deploy_params["entraLoginPrincipalId"] = rbac_principal_id
+        deploy_params["entraLoginPrincipalType"] = rbac_principal_type
     if kv_resource_id:
         deploy_params["keyVaultResourceId"] = kv_resource_id
+    if extra_tags:
+        deploy_params["extraTags"] = extra_tags
 
     try:
         from board.azure.deployment import bicep_build
@@ -710,33 +804,27 @@ async def _run_up(
 
     # ── Conditional Access: MFA for VM SSH ──
     if auth_method == "entra-id":
-        from board.azure.mfa import (
-            add_member_to_board_group,
-            check_mfa_policy,
-            find_board_group,
-        )
+        from board.azure.mfa import add_member_to_board_group, check_mfa_policy
 
         with con.spin("Checking MFA policy for Azure Linux VM SSH..."):
             mfa_exists, mfa_name = await check_mfa_policy()
         if mfa_exists:
             con.success(f"MFA policy active: {mfa_name}")
-
-            # Ensure the developer is in the Board VM Users group.
-            with con.spin("Checking Board VM Users group membership..."):
-                group_id = await find_board_group()
-            if group_id and dev_principal_id:
-                with con.spin("Adding developer to Board VM Users group..."):
-                    added, add_msg = await add_member_to_board_group(group_id, dev_principal_id)
-                if added:
-                    con.success(add_msg)
-                else:
-                    con.warn(add_msg)
         else:
             con.warn("No MFA Conditional Access policy found for Azure Linux VM SSH.")
             con.warn("A tenant admin should run: board admin mfa-setup")
             provision_warnings.append(
                 "MFA: No Conditional Access policy. Run 'board admin mfa-setup'."
             )
+
+        # Ensure the developer is in the security group (for both RBAC and MFA).
+        if login_group_id and dev_principal_id:
+            with con.spin(f"Adding developer to '{security_group_name}'..."):
+                added, add_msg = await add_member_to_board_group(login_group_id, dev_principal_id)
+            if added:
+                con.success(add_msg)
+            else:
+                con.warn(add_msg)
 
     # ── Cloud-init wait ──
     cloud_init_start = time.monotonic()
@@ -857,8 +945,11 @@ async def _run_up(
             con.completion_box(
                 f"{dev_name}'s board is ready",
                 [
-                    f"Connect:  ssh {deploy_cfg.ssh_host_alias}",
-                    f"VS Code:  Remote-SSH > {deploy_cfg.ssh_host_alias}",
+                    "Connect in VS Code:",
+                    f"  Remote-SSH → {deploy_cfg.ssh_host_alias}",
+                    "  Start your app, then open the Ports tab to see the URL.",
+                    "",
+                    f"Terminal:  ssh {deploy_cfg.ssh_host_alias}",
                     "",
                     "Prerequisite: az login",
                     "Auth: Entra ID (tenant-locked)",
@@ -875,6 +966,9 @@ async def _run_up(
                     f"  board vm stop {dev_name}",
                     "  board admin",
                     "",
+                    "Developer connects via VS Code Remote-SSH.",
+                    "  Start app → Ports tab shows the browser URL.",
+                    "",
                     "Prerequisite: az login",
                     "Auth: Entra ID (tenant-locked)",
                     "",
@@ -885,8 +979,11 @@ async def _run_up(
         con.completion_box(
             f"{dev_name}'s board is ready",
             [
-                f"Connect:  ssh {deploy_cfg.ssh_host_alias}",
-                f"VS Code:  Remote-SSH > {deploy_cfg.ssh_host_alias}",
+                "Connect in VS Code:",
+                f"  Remote-SSH → {deploy_cfg.ssh_host_alias}",
+                "  Start your app, then open the Ports tab to see the URL.",
+                "",
+                f"Terminal:  ssh {deploy_cfg.ssh_host_alias}",
                 "",
                 "Daily:",
                 f"  board vm start {dev_name}",
@@ -929,25 +1026,30 @@ async def _run_up(
 
             await _run_export_pass(
                 name=dev_name,
-                environment=environment,
+                resource_group=rg_name,
                 region=location,
-                region_short=region_short,
             )
         else:
-            con.info(f"Create one later with: board export-pass {dev_name}")
+            con.info(f"Create one later with: board export-pass {dev_name} --rg {rg_name}")
 
 
 def up_command(
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate inputs without deploying."),
-    demo: bool = typer.Option(False, "--demo", help="Use canned data for all external calls."),
     non_interactive: bool = typer.Option(
         False,
         "--non-interactive",
-        help="Use env vars/defaults, skip prompts.",
+        help="Use --rg/--preset and skip prompts.",
     ),
-    env: str = typer.Option("", "--env", help="Environment name override."),
-    location: str = typer.Option("", "--location", help="Azure region (e.g. australiaeast)."),
-    region_short: str = typer.Option("", "--region-short", help="Short region code (e.g. aue)."),
+    rg: str = typer.Option(
+        "",
+        "--rg",
+        help="Existing Azure resource group to deploy into. Required if no preset supplies one.",
+    ),
+    preset: str = typer.Option(
+        "",
+        "--preset",
+        help="Path to a .bicepparam preset file with default values for the wizard.",
+    ),
 ) -> None:
     """Create a new developer board (5-phase setup wizard)."""
-    asyncio.run(_run_up(dry_run, demo, non_interactive, env, location, region_short))
+    asyncio.run(_run_up(dry_run, non_interactive, rg, preset))

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from pathlib import Path
 
 import typer
@@ -14,30 +16,32 @@ from board.models.deployment import LlmConfig
 from board.ui import console as con
 from board.ui import prompts
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
+
+async def _select_rg() -> str:
+    """Pick the resource group to operate on. Honours BOARD_RG, else prompts."""
+    rg = os.environ.get("BOARD_RG", "")
+    if rg:
+        con.info(f"Using BOARD_RG={rg}")
+        return rg
+    rg = await prompts.input_text("Resource group", default="")
+    if not rg:
+        con.error("Resource group is required.")
+    return rg
 
 
-async def _select_env() -> str:
-    """Pick an environment from discovered bicepparams."""
-    params = cfg.discover_bicepparams()
-    env_names = [name for name, _ in params]
-
-    if not env_names:
-        con.error("No environments found in infra/config/")
-        return ""
-
-    if len(env_names) == 1:
-        con.info(f"Auto-selected environment: {env_names[0]}")
-        return env_names[0]
-
-    return await prompts.choose("Select environment:", env_names)
+def _rg_location(rg: str) -> str:
+    """Look up the resource group's location."""
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "group", "show", "--name", rg, "--query", "location", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() or "australiaeast"
 
 
-async def _select_vm(environment: str) -> tuple[str, str]:
-    """Pick a VM from the resource group. Returns (vm_name, rg_name)."""
-    rg_name = cfg.resource_group(environment, DEFAULT_REGION)
-
+async def _select_vm(rg_name: str) -> str:
+    """Pick a VM from the resource group. Returns the VM name (empty if none)."""
     from board.azure.auth import get_credential, get_subscription_id
     from board.azure.compute import list_vms
 
@@ -49,17 +53,16 @@ async def _select_vm(environment: str) -> tuple[str, str]:
 
     if not vms:
         con.info(f"No VMs found in resource group {rg_name}")
-        return "", rg_name
+        return ""
 
     if len(vms) == 1:
         vm = vms[0]
         con.info(f"Auto-selected VM: {vm['name']} ({vm['power_state']})")
-        return vm["name"], rg_name
+        return str(vm["name"])
 
     display = [f"{vm['name']}  ({vm['power_state']}, {vm['vm_size']})" for vm in vms]
     chosen = await prompts.choose("Select a VM:", display)
-    vm_name = chosen.split("  ")[0]
-    return vm_name, rg_name
+    return chosen.split("  ")[0]
 
 
 def _derive_dev_name(vm_name: str) -> str:
@@ -69,16 +72,16 @@ def _derive_dev_name(vm_name: str) -> str:
 
 async def _manage_vms() -> None:
     """VM management submenu."""
-    environment = await _select_env()
-    if not environment:
+    rg_name = await _select_rg()
+    if not rg_name:
         return
 
-    vm_name, rg_name = await _select_vm(environment)
+    vm_name = await _select_vm(rg_name)
     if not vm_name:
         return
 
     dev_name = _derive_dev_name(vm_name)
-    fqdn = cfg.hostname(dev_name, DEFAULT_LOCATION)
+    fqdn = cfg.hostname(dev_name, _rg_location(rg_name))
     key_path = cfg.ssh_key_path_expanded(dev_name)
 
     from board.azure.auth import get_credential, get_subscription_id
@@ -129,16 +132,16 @@ async def _manage_vms() -> None:
 
 async def _provision_projects_menu() -> None:
     """Set up projects on an existing VM."""
-    environment = await _select_env()
-    if not environment:
+    rg_name = await _select_rg()
+    if not rg_name:
         return
 
-    vm_name, rg_name = await _select_vm(environment)
+    vm_name = await _select_vm(rg_name)
     if not vm_name:
         return
 
     dev_name = _derive_dev_name(vm_name)
-    fqdn = cfg.hostname(dev_name, DEFAULT_LOCATION)
+    fqdn = cfg.hostname(dev_name, _rg_location(rg_name))
     key_path = cfg.ssh_key_path_expanded(dev_name)
 
     # Find manifests
@@ -213,11 +216,11 @@ async def _provision_projects_menu() -> None:
 
 async def _export_bundle_menu() -> None:
     """Create a board pass."""
-    environment = await _select_env()
-    if not environment:
+    rg_name = await _select_rg()
+    if not rg_name:
         return
 
-    vm_name, _ = await _select_vm(environment)
+    vm_name = await _select_vm(rg_name)
     if not vm_name:
         return
 
@@ -227,9 +230,8 @@ async def _export_bundle_menu() -> None:
 
     await _run_export_pass(
         name=dev_name,
-        environment=environment,
-        region=DEFAULT_LOCATION,
-        region_short=DEFAULT_REGION,
+        resource_group=rg_name,
+        region=_rg_location(rg_name),
     )
 
     con.divider()
@@ -280,16 +282,16 @@ async def _manage_secrets() -> None:
 
 async def _health_checks() -> None:
     """Run health checks on a VM."""
-    environment = await _select_env()
-    if not environment:
+    rg_name = await _select_rg()
+    if not rg_name:
         return
 
-    vm_name, _ = await _select_vm(environment)
+    vm_name = await _select_vm(rg_name)
     if not vm_name:
         return
 
     dev_name = _derive_dev_name(vm_name)
-    fqdn = cfg.hostname(dev_name, DEFAULT_LOCATION)
+    fqdn = cfg.hostname(dev_name, _rg_location(rg_name))
 
     con.info(f"Running health checks on board {fqdn}...")
 
@@ -350,19 +352,22 @@ def _admin_callback(ctx: typer.Context) -> None:
 async def _run_mfa_setup() -> None:
     """Create the Conditional Access MFA policy for Azure Linux VM SSH."""
     from board.azure.mfa import (
-        BOARD_GROUP_NAME,
         add_member_to_board_group,
         check_mfa_policy,
         create_mfa_policy,
         ensure_board_group,
         get_signed_in_user_id,
     )
+    from board.core import policies as pol
+
+    policies = pol.load()
+    group_name = policies.security_group_name if policies is not None else "Board VM Users"
 
     con.header("MFA Policy Setup")
     con.info("This creates a Conditional Access policy in Entra ID that")
     con.info("requires MFA for Azure Linux VM SSH sign-ins.")
     con.info("")
-    con.info(f"The policy is scoped to the '{BOARD_GROUP_NAME}' security group,")
+    con.info(f"The policy is scoped to the '{group_name}' security group,")
     con.info("so only members of that group are affected — not the whole tenant.")
     con.info("")
     con.warn("Requires: Conditional Access Administrator or Global Administrator role.")
@@ -384,8 +389,8 @@ async def _run_mfa_setup() -> None:
         return
 
     # Ensure the security group exists for scoping the policy.
-    with con.spin(f"Finding or creating '{BOARD_GROUP_NAME}' security group..."):
-        group_id, group_msg = await ensure_board_group()
+    with con.spin(f"Finding or creating '{group_name}' security group..."):
+        group_id, group_msg = await ensure_board_group(group_name)
 
     if not group_id:
         con.error(group_msg)
@@ -404,7 +409,7 @@ async def _run_mfa_setup() -> None:
         with con.spin("Resolving your Entra ID identity..."):
             my_id = await get_signed_in_user_id()
         if my_id:
-            with con.spin(f"Adding you to '{BOARD_GROUP_NAME}'..."):
+            with con.spin(f"Adding you to '{group_name}'..."):
                 added, add_msg = await add_member_to_board_group(group_id, my_id)
             if added:
                 con.success(add_msg)
@@ -414,7 +419,7 @@ async def _run_mfa_setup() -> None:
             con.warn("Could not resolve your user ID — add yourself to the group manually.")
 
         con.info("")
-        con.info(f"Add other users to '{BOARD_GROUP_NAME}' in Entra ID to enforce MFA for them.")
+        con.info(f"Add other users to '{group_name}' in Entra ID to enforce MFA for them.")
     else:
         con.error(msg)
         if "licence" in msg.lower() or "licensed" in msg.lower():

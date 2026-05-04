@@ -18,12 +18,27 @@ from board.ssh.config_file import (
 )
 from board.ui import console as con
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
+
+def _resolve_rg(rg_arg: str = "") -> str:
+    rg = rg_arg or os.environ.get("BOARD_RG", "")
+    if not rg:
+        con.error("Resource group is required. Pass --rg or set BOARD_RG.")
+        raise typer.Exit(1)
+    return rg
 
 
-def _resolve_env() -> str:
-    return os.environ.get("BOARD_ENVIRONMENT", "personal")
+def _rg_location(rg: str) -> str:
+    """Look up the resource group's location."""
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "group", "show", "--name", rg, "--query", "location", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not resolve location for resource group '{rg}'.")
+        raise typer.Exit(1)
+    return result.stdout.strip()
 
 
 def _resolve_auth_method(rg: str, vm: str) -> str:
@@ -50,20 +65,13 @@ def _resolve_auth_method(rg: str, vm: str) -> str:
     return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
 
 
-def _build_block(
-    name: str,
-    location: str,
-    auth: str,
-    env: str,
-    region_short: str,
-) -> str:
+def _build_block(name: str, rg: str, location: str, auth: str) -> str:
     """Build the appropriate SSH config block based on auth method."""
     alias = cfg.ssh_host_alias(name)
     fqdn = cfg.hostname(name, location)
 
     if auth == "auto":
-        rg = cfg.resource_group(env, region_short)
-        vm = cfg.vm_name(env, region_short, name)
+        vm = cfg.vm_name(rg, name)
         auth = _resolve_auth_method(rg, vm)
         con.info(f"Auth method: {auth} (from VM tag)")
 
@@ -77,17 +85,14 @@ def _build_block(
 @ssh_config_app.command()
 def show(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     auth: str = typer.Option("auto", "--auth", help="Auth method: auto, ssh-key, or entra-id."),
-    env: str = typer.Option(
-        "", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."
-    ),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
 ) -> None:
     """Print the SSH config block for a developer."""
-    resolved_env = env or _resolve_env()
+    rg_name = _resolve_rg(rg)
+    location = _rg_location(rg_name)
     alias = cfg.ssh_host_alias(name)
-    block = _build_block(name, location, auth, resolved_env, region_short)
+    block = _build_block(name, rg_name, location, auth)
 
     con.console.print("# Add this to ~/.ssh/config\n")
     con.console.print(block)
@@ -98,17 +103,14 @@ def show(
 @ssh_config_app.command()
 def write(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     auth: str = typer.Option("auto", "--auth", help="Auth method: auto, ssh-key, or entra-id."),
-    env: str = typer.Option(
-        "", "--env", help="Environment (default: $BOARD_ENVIRONMENT or personal)."
-    ),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
 ) -> None:
     """Write SSH config block to ~/.ssh/config (idempotent)."""
-    resolved_env = env or _resolve_env()
+    rg_name = _resolve_rg(rg)
+    location = _rg_location(rg_name)
     alias = cfg.ssh_host_alias(name)
-    block = _build_block(name, location, auth, resolved_env, region_short)
+    block = _build_block(name, rg_name, location, auth)
     config_path = Path.home() / ".ssh" / "config"
 
     write_managed_block(config_path, alias, block)

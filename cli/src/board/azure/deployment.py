@@ -7,6 +7,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.deployments.aio import DeploymentsMgmtClient
 from azure.mgmt.resource.deployments.models import (
@@ -14,10 +15,15 @@ from azure.mgmt.resource.deployments.models import (
     DeploymentMode,
     DeploymentProperties,
 )
-from azure.mgmt.resource.resources.models import ResourceGroup
 
 from board.azure.az import az_text
-from board.core.errors import DeploymentError
+from board.core.errors import BoardError, DeploymentError
+
+# Built-in role definition GUIDs (stable across all Azure tenants).
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
+_OWNER_ROLE_ID = "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
+_CONTRIBUTOR_ROLE_ID = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+_DEPLOY_ROLE_IDS = (_OWNER_ROLE_ID, _CONTRIBUTOR_ROLE_ID)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -154,24 +160,31 @@ async def deploy(
     return outputs
 
 
-async def ensure_resource_group(
+async def verify_resource_group(
     credential: Any,
     subscription_id: str,
     name: str,
-    location: str,
-    tags: dict[str, str] | None = None,
-) -> None:
-    """Create a resource group if it doesn't already exist.
+    principal_id: str,
+) -> tuple[str, dict[str, str]]:
+    """Confirm the resource group exists and the caller can deploy to it.
+
+    Board never creates resource groups — they must be provisioned out-of-band
+    by a platform team. This helper fails loud if the RG is missing or if the
+    caller lacks Contributor / Owner on it.
 
     Args:
         credential: Azure credential object.
         subscription_id: Target subscription.
         name: Resource group name.
-        location: Azure region (e.g. "australiaeast").
-        tags: Optional resource tags.
+        principal_id: Object ID of the signed-in user, used for the role check.
+
+    Returns:
+        Tuple of ``(location, tags)`` from the existing RG. Tags is an empty
+        dict if the RG has none.
 
     Raises:
-        DeploymentError: If creation fails or the RG is in a bad state.
+        BoardError: RG missing, in a bad provisioning state, or the caller
+            does not have Contributor or higher on it.
     """
     client = ResourceManagementClient(credential, subscription_id)
 
@@ -179,35 +192,66 @@ async def ensure_resource_group(
         exists = await asyncio.to_thread(client.resource_groups.check_existence, name)
     except Exception as exc:
         msg = f"Failed to check resource group '{name}': {exc}"
-        raise DeploymentError(msg) from exc
+        raise BoardError(msg) from exc
 
-    if exists:
-        # Verify it's in a usable state
-        rg = await asyncio.to_thread(client.resource_groups.get, name)
-        state = rg.properties.provisioning_state if rg.properties else None
-        if state == "Deleting":
-            msg = (
-                f"Resource group '{name}' is being deleted. "
-                "Wait for deletion to complete and retry."
-            )
-            raise DeploymentError(msg)
-        if state and state not in ("Succeeded", "Updating"):
-            msg = f"Resource group '{name}' is in state '{state}'. Delete it first."
-            raise DeploymentError(msg)
-        return
+    if not exists:
+        msg = (
+            f"Resource group '{name}' not found in subscription {subscription_id}. "
+            "Create it manually first (or pick another)."
+        )
+        raise BoardError(msg)
 
-    rg_params = ResourceGroup(
-        location=location,
-        tags=tags
-        or {
-            "project": "devvm",
-            "managed-by": "board-cli",
-        },
-    )
+    rg = await asyncio.to_thread(client.resource_groups.get, name)
+    state = rg.properties.provisioning_state if rg.properties else None
+    if state == "Deleting":
+        msg = (
+            f"Resource group '{name}' is being deleted. "
+            "Wait for deletion to complete or pick another."
+        )
+        raise BoardError(msg)
+    if state and state not in ("Succeeded", "Updating"):
+        msg = f"Resource group '{name}' is in state '{state}'. Cannot deploy."
+        raise BoardError(msg)
+
+    # Permission check: caller must have Contributor or Owner on the RG.
+    if not principal_id:
+        msg = (
+            "Could not resolve the signed-in user. Run 'az login' as a user "
+            "account (not a service principal) and retry."
+        )
+        raise BoardError(msg)
+
+    auth_client = AuthorizationManagementClient(credential, subscription_id)
+    rg_scope = f"/subscriptions/{subscription_id}/resourceGroups/{name}"
+
     try:
-        await asyncio.to_thread(
-            lambda: client.resource_groups.create_or_update(name, rg_params),
+        assignments = await asyncio.to_thread(
+            lambda: list(
+                auth_client.role_assignments.list_for_scope(
+                    scope=rg_scope,
+                    filter=f"atScope() and assignedTo('{principal_id}')",
+                ),
+            ),
         )
     except Exception as exc:
-        msg = f"Failed to create resource group '{name}': {exc}"
-        raise DeploymentError(msg) from exc
+        msg = (
+            f"Failed to list role assignments on '{name}': {exc}. "
+            "Confirm you have at least Reader on the resource group."
+        )
+        raise BoardError(msg) from exc
+
+    has_deploy_role = any(
+        (rid := getattr(a, "role_definition_id", None))
+        and rid.rsplit("/", 1)[-1] in _DEPLOY_ROLE_IDS
+        for a in assignments
+    )
+    if not has_deploy_role:
+        msg = (
+            f"You don't have Contributor or Owner on resource group '{name}'. "
+            "Ask a subscription admin to grant you one of those roles, then retry."
+        )
+        raise BoardError(msg)
+
+    location = rg.location or ""
+    tags = dict(rg.tags) if rg.tags else {}
+    return location, tags

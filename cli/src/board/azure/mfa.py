@@ -22,8 +22,8 @@ _POLICY_DISPLAY_NAME = "Board: Require MFA for Azure Linux VM SSH"
 # Graph API endpoint for Conditional Access policies.
 _CA_POLICIES_URL = "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
 
-# Security group used to scope the MFA policy.
-BOARD_GROUP_NAME = "Board VM Users"
+# Default security group name (overridden by policies.security_group_name).
+DEFAULT_GROUP_NAME = "Board VM Users"
 _GROUPS_URL = "https://graph.microsoft.com/v1.0/groups"
 
 
@@ -58,15 +58,15 @@ async def _resolve_vm_signin_app_id() -> str:
     return fallback
 
 
-async def find_board_group() -> str | None:
-    """Find the 'Board VM Users' security group, return its object ID or ``None``."""
+async def find_board_group(group_name: str = DEFAULT_GROUP_NAME) -> str | None:
+    """Find the security group by display name, return its object ID or ``None``."""
     try:
         raw = await az_text(
             "rest",
             "--method",
             "GET",
             "--url",
-            f"{_GROUPS_URL}?$filter=displayName eq '{BOARD_GROUP_NAME}'",
+            f"{_GROUPS_URL}?$filter=displayName eq '{group_name}'",
             timeout=15,
         )
         data = json.loads(raw)
@@ -74,26 +74,29 @@ async def find_board_group() -> str | None:
         return None
 
     for group in data.get("value", []):
-        if group.get("displayName") == BOARD_GROUP_NAME:
+        if group.get("displayName") == group_name:
             return group.get("id")  # type: ignore[no-any-return]
     return None
 
 
-async def ensure_board_group() -> tuple[str | None, str]:
-    """Find or create the 'Board VM Users' security group.
+async def ensure_board_group(group_name: str = DEFAULT_GROUP_NAME) -> tuple[str | None, str]:
+    """Find or create the security group.
 
     Returns ``(group_object_id, message)``.  ``group_object_id`` is
     ``None`` when creation fails (e.g. insufficient permissions).
     """
-    existing = await find_board_group()
+    existing = await find_board_group(group_name)
     if existing:
-        return existing, f"Using existing group: {BOARD_GROUP_NAME}"
+        return existing, f"Using existing group: {group_name}"
+
+    # Derive a mail nickname from the display name (alphanumeric only).
+    mail_nickname = "".join(ch for ch in group_name if ch.isalnum())
 
     body = {
-        "displayName": BOARD_GROUP_NAME,
-        "description": "Users subject to Board MFA policy for Azure Linux VM SSH.",
+        "displayName": group_name,
+        "description": f"Users subject to Board MFA policy for Azure Linux VM SSH ({group_name}).",
         "mailEnabled": False,
-        "mailNickname": "BoardVMUsers",
+        "mailNickname": mail_nickname or "BoardVMUsers",
         "securityEnabled": True,
     }
     try:
@@ -112,7 +115,7 @@ async def ensure_board_group() -> tuple[str | None, str]:
         data = json.loads(raw)
         group_id = data.get("id")
         if group_id:
-            return group_id, f"Created security group: {BOARD_GROUP_NAME}"
+            return group_id, f"Created security group: {group_name}"
         return None, "Group creation returned no ID"
     except BoardError as exc:
         return None, f"Could not create security group: {exc}"
@@ -136,7 +139,7 @@ async def get_signed_in_user_id() -> str | None:
 
 
 async def add_member_to_board_group(group_id: str, user_object_id: str) -> tuple[bool, str]:
-    """Add a user to the Board VM Users security group.
+    """Add a user to the security group.
 
     Returns ``(success, message)``.  Silently succeeds if the user is
     already a member (Graph API returns 400 with "already exist").

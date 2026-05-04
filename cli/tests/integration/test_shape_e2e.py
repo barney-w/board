@@ -55,7 +55,7 @@ class TestBicepParameterNames:
         bicep_params = self._extract_param_names(bicep_source)
 
         # These are the params setup.py passes to deploy()
-        setup_params = {"developerName", "vmSku", "adminSshPublicKey", "environment"}
+        setup_params = {"developerName", "vmSku", "adminSshPublicKey"}
         missing = setup_params - bicep_params
         assert not missing, f"setup.py passes params not in main.bicep: {missing}"
 

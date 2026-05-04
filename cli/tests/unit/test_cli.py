@@ -43,11 +43,9 @@ class TestCommandRegistration:
         assert result.exit_code == 0
         output = _plain(result.output)
         assert "--dry-run" in output
-        assert "--demo" in output
         assert "--non-interactive" in output
-        assert "--env" in output
-        assert "--location" in output
-        assert "--region-short" in output
+        assert "--rg" in output
+        assert "--preset" in output
 
     def test_admin_help(self) -> None:
         result = runner.invoke(app, ["admin", "--help"])
@@ -65,8 +63,7 @@ class TestCommandRegistration:
         result = runner.invoke(app, ["fleet", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
-        assert "--env" in output
-        assert "--region-short" in output
+        assert "--rg" in output
 
     def test_init_help(self) -> None:
         result = runner.invoke(app, ["init", "--help"])
@@ -84,7 +81,7 @@ class TestCommandRegistration:
         result = runner.invoke(app, ["export-pass", "--help"])
         assert result.exit_code == 0
         output = _plain(result.output)
-        assert "--env" in output
+        assert "--rg" in output
         assert "--region" in output
 
     def test_vm_help_lists_subcommands(self) -> None:
