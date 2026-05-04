@@ -217,13 +217,13 @@ write_files:
           echo "    Open this URL in any browser. Sign in with GitHub."
       fi
       if systemctl is-active --quiet code-server@devuser 2>/dev/null; then
-          echo "  code-server:    http://localhost:8080 (via SSH tunnel)"
+          echo "  code-server:    http://localhost:18080 (via SSH tunnel — VM bind is :8080)"
       fi
       if systemctl is-active --quiet cockpit.socket 2>/dev/null; then
-          echo "  Cockpit:        http://localhost:9091 (via SSH tunnel on port 9190, login: devuser / board)"
+          echo "  Cockpit:        https://localhost:9091 (via SSH tunnel on port 9190, login: devuser / board)"
       fi
       if docker inspect --format='{{.State.Running}}' portainer 2>/dev/null | grep -q true; then
-          echo "  Portainer:      http://localhost:9000 (pwd: $(cat ~/.portainer-password 2>/dev/null || echo 'see ~/.portainer-password'))"
+          echo "  Portainer:      https://localhost:9444 (pwd: $(cat ~/.portainer-password 2>/dev/null || echo 'see ~/.portainer-password'))"
       fi
       echo ""
 
@@ -303,6 +303,8 @@ write_files:
       if [[ -f /home/devuser/.board/tunnel-url ]]; then
           echo "  ${dim}tunnel${reset}          $(cat /home/devuser/.board/tunnel-url)"
       fi
+      echo "  ${dim}vibe${reset}            2-column tmux layout (Ctrl+B d to detach, z to zoom)"
+      echo "  ${dim}plain bash${reset}      BOARD_NO_TMUX=1 ssh …  or  just ssh <vm> --plain"
       echo ""
       echo "  ${dim}board v1.0.0${reset}"
       echo ""
@@ -434,7 +436,6 @@ write_files:
       Description=Check for idle shutdown every 15 minutes during shutdown window
       [Timer]
       OnCalendar=*-*-* 19,20,21:00/15
-      Persistent=true
       [Install]
       WantedBy=timers.target
 
@@ -512,7 +513,140 @@ write_files:
       [Install]
       WantedBy=timers.target
 
+  # ── Entra users: redirect to devuser workspace (appended to bash.bashrc) ──
+  # /etc/bash.bashrc runs for all interactive shells (including VS Code terminals).
+  # write_files with append:true lands this in the first-boot pass — before SSH is
+  # accepting connections — so Entra users get the redirect on their very first login.
+  - path: /etc/bash.bashrc
+    append: true
+    content: |
+
+      # Board: Entra ID users work in devuser's home, not their own
+      if [ "$HOME" != "/home/devuser" ] && id -nG 2>/dev/null | grep -qw aad_admins; then
+        export PATH="/home/devuser/.local/bin:$PATH"
+        export BOARD_USER="devuser"
+        cd /home/devuser/projects 2>/dev/null || true
+      fi
+
+      # board-auto-tmux: drop SSH users into 2-column vibe-coding layout
+      if [[ -n "${SSH_CONNECTION:-}" \
+            && -z "${TMUX:-}" \
+            && $- == *i* \
+            && -z "${BOARD_NO_TMUX:-}" \
+            && "${TERM_PROGRAM:-}" != "vscode" \
+            && -z "${VSCODE_INJECTION:-}" \
+            && -z "${VSCODE_IPC_HOOK_CLI:-}" ]] \
+         && command -v tmux >/dev/null \
+         && command -v vibe >/dev/null; then
+        exec vibe
+      fi
+
+  # Re-exec into bash for any login shell that isn't already bash.
+  # Azure AD provisions Linux users with the system default shell — Ubuntu's
+  # is /bin/sh (dash), which never sources /etc/bash.bashrc and so misses
+  # both the auto-tmux hook and the PS1/aliases. /etc/profile is sourced by
+  # both sh and bash on login, so a single guarded exec catches every user.
+  - path: /etc/profile.d/board-bash.sh
+    permissions: '0644'
+    owner: root:root
+    content: |
+      # shellcheck shell=sh
+      if [ -z "${BASH_VERSION:-}" ] \
+          && [ -t 0 ] \
+          && [ -n "${SSH_CONNECTION:-}" ] \
+          && [ -x /bin/bash ]; then
+          exec /bin/bash -l
+      fi
+
+  - path: /usr/local/bin/vibe
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      # Attach to or create the "board" tmux session with 2-column vibe-coding layout.
+      set -uo pipefail
+
+      SESSION="board"
+      # Resolve target home: Entra ID users redirect to /home/devuser per /etc/bash.bashrc
+      TARGET_HOME="${BOARD_USER:+/home/$BOARD_USER}"
+      TARGET_HOME="${TARGET_HOME:-$HOME}"
+      PROJECTS="$TARGET_HOME/projects"
+      HELP_MARKER="$TARGET_HOME/.board/tmux-help-shown"
+
+      if tmux has-session -t "$SESSION" 2>/dev/null; then
+        exec tmux attach -t "$SESSION"
+      fi
+
+      mkdir -p "$(dirname "$HELP_MARKER")" 2>/dev/null || true
+
+      # Create detached session. Don't pass -x/-y; tmux uses defaults and resizes
+      # to the attaching client. Avoids `tput` quirks during shell init.
+      if ! tmux new-session -d -s "$SESSION" -c "$PROJECTS"; then
+        echo "vibe: failed to create tmux session -- falling back to bash" >&2
+        exec bash
+      fi
+
+      # Use pane ids (%N) -- immutable, ignores base-index / pane-base-index.
+      LEFT_PANE="$(tmux display-message -p -t "$SESSION" '#{pane_id}' 2>/dev/null || true)"
+      if [ -n "$LEFT_PANE" ]; then
+        if tmux split-window -h -t "$LEFT_PANE" -c "$PROJECTS" 2>/dev/null; then
+          RIGHT_PANE="$(tmux display-message -p -t "$SESSION" '#{pane_id}' 2>/dev/null || true)"
+          if [ -n "${RIGHT_PANE:-}" ]; then
+            tmux send-keys -t "$RIGHT_PANE" "copilot" C-m
+          fi
+        fi
+
+        if [ ! -f "$HELP_MARKER" ]; then
+          tmux send-keys -t "$LEFT_PANE" "cat /etc/board/tmux-cheatsheet.txt" C-m
+          touch "$HELP_MARKER" 2>/dev/null || true
+        fi
+
+        tmux select-pane -t "$LEFT_PANE" 2>/dev/null || true
+      fi
+
+      exec tmux attach -t "$SESSION"
+
+  - path: /etc/board/tmux-cheatsheet.txt
+    permissions: '0644'
+    owner: root:root
+    content: |
+      ─────────────────────────────────────────────────────────────
+        WELCOME TO YOUR BOARD VM — 2-COLUMN VIBE CODING LAYOUT
+      ─────────────────────────────────────────────────────────────
+        Left pane  : your shell, in ~/projects
+        Right pane : copilot CLI (GitHub Copilot, ready to chat)
+
+        MOVING BETWEEN PANES
+          Click any pane to switch to it (mouse is on)
+          Ctrl+B then ←/→  →  move focus left/right (or ↑/↓)
+          Ctrl+B then o    →  cycle to next pane
+
+        REARRANGING PANES
+          Ctrl+B then {    →  swap current pane with previous
+          Ctrl+B then }    →  swap current pane with next
+
+        OTHER USEFUL KEYS
+          Ctrl+B then d    →  detach (your session keeps running)
+          Ctrl+B then z    →  zoom current pane fullscreen (toggle)
+
+        RECONNECT LATER
+          just ssh <vmname>      reattaches your session
+          BOARD_NO_TMUX=1 ssh …  skip the layout (plain bash)
+
+        OTHER CLIS READY
+          gh        GitHub CLI       (run: gh auth login)
+          glab      GitLab CLI       (run: glab auth login --hostname <host>)
+          claude    Claude Code CLI  (run: claude)
+
+        Type 'board-help' anytime for the full cheatsheet.
+      ─────────────────────────────────────────────────────────────
+
 runcmd:
+  # ── Default shell for new users (incl. AAD-provisioned Entra ID users) ──
+  # Ubuntu defaults to /bin/sh; that misses /etc/bash.bashrc where our
+  # auto-tmux + PS1 live. Belt-and-braces with /etc/profile.d/board-bash.sh.
+  - sed -i 's|^SHELL=.*|SHELL=/bin/bash|' /etc/default/useradd
+
   # ── Fix ownership of home directory and subdirectories ──
   - chown devuser:devuser /home/devuser
   - mkdir -p /home/devuser/.board /home/devuser/.config
@@ -596,13 +730,16 @@ runcmd:
     apt-get -o DPkg::Lock::Timeout=120 update
     apt-get -o DPkg::Lock::Timeout=120 install -y nodejs
 
-  # ── pnpm via corepack (pinned to match surf-kit packageManager field) ──
-  - corepack enable
-  - corepack prepare pnpm@10.33.0 --activate
+  # ── pnpm: install directly via npm ──
+  # Corepack ships with stale signing keys on Node LTS minor releases and stalls
+  # silently on `corepack prepare`. npm install is signature-checked by the
+  # registry and matches the pattern used for claude-code / @github/copilot below.
+  # Per-repo `packageManager` pinning still works locally via `pnpm self-update`.
+  - timeout 120 npm install -g pnpm@10.33.0
 
-  # ── Python: install from deadsnakes if not already 3.12+ ──
-  - add-apt-repository -y ppa:deadsnakes/ppa
-  - apt-get -o DPkg::Lock::Timeout=120 update
+  # ── Python 3.12 (ships in noble main; deadsnakes PPA dropped — it can
+  #    hang `add-apt-repository` for 30+ min on a flaky launchpad keyserver
+  #    and blocks the rest of runcmd) ──
   - apt-get -o DPkg::Lock::Timeout=120 install -y python3.12 python3.12-venv python3.12-dev
   - update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
@@ -625,6 +762,23 @@ runcmd:
       | tee /etc/apt/sources.list.d/github-cli.list
     apt-get -o DPkg::Lock::Timeout=120 update
     apt-get -o DPkg::Lock::Timeout=120 install -y gh
+
+  # ── GitLab CLI (glab) — apt repo, mirrors the gh pattern above ──
+  - |
+    curl -fsSL https://packages.gitlab.com/gitlab-org/cli/gpgkey \
+      | gpg --dearmor -o /usr/share/keyrings/gitlab-cli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gitlab-cli-archive-keyring.gpg] https://packages.gitlab.com/gitlab-org/cli/ubuntu $(lsb_release -cs) main" \
+      | tee /etc/apt/sources.list.d/gitlab-cli.list
+    apt-get -o DPkg::Lock::Timeout=120 update
+    apt-get -o DPkg::Lock::Timeout=120 install -y glab || echo "[board] WARN: glab install failed (non-fatal)"
+
+  # ── Claude Code CLI (global install — needs root for /usr/lib/node_modules) ──
+  - |
+    npm install -g @anthropic-ai/claude-code 2>&1 || echo '[board] WARN claude install failed (non-fatal)'
+
+  # ── GitHub Copilot CLI (standalone, for vibe-coding right pane) ──
+  - |
+    npm install -g @github/copilot 2>&1 || echo '[board] WARN copilot install failed (non-fatal)'
 
   # ── GitHub Copilot CLI extension (best-effort — requires gh auth, installed properly in setup-me.sh step 3) ──
   - su - devuser -c "gh extension install github/gh-copilot 2>/dev/null || true"
@@ -707,19 +861,6 @@ runcmd:
       fi
     fi
     ENTRA_ACL
-
-  # ── Entra users: redirect to devuser workspace ──
-  # /etc/bash.bashrc runs for all interactive shells (including VS Code terminals)
-  - |
-    cat >> /etc/bash.bashrc << 'ENTRA_REDIRECT'
-
-    # Board: Entra ID users work in devuser's home, not their own
-    if [ "$HOME" != "/home/devuser" ] && id -nG 2>/dev/null | grep -qw aad_admins; then
-      export PATH="/home/devuser/.local/bin:$PATH"
-      export BOARD_USER="devuser"
-      cd /home/devuser/projects 2>/dev/null || true
-    fi
-    ENTRA_REDIRECT
 
   # ── Create dev workspace ──
   - mkdir -p /home/devuser/projects
@@ -919,9 +1060,9 @@ runcmd:
         journalctl --user -u <service> -f     stream service logs
 
       Browser Tools (auto-forwarded by VS Code, or use forward-ports)
-        code-server    http://localhost:8080   browser IDE
-        cockpit        http://localhost:9091   system admin, logs, files
-        portainer      http://localhost:9000   Docker management (pwd in ~/.portainer-password)
+        code-server    http://localhost:18080  browser IDE (SSH tunnel; VM bind :8080)
+        cockpit        https://localhost:9091  system admin, logs, files
+        portainer      https://localhost:9444  Docker management (pwd in ~/.portainer-password)
 
       Git
         gs                     git status
@@ -934,6 +1075,22 @@ runcmd:
         dc down                docker compose down
         dc logs -f             Follow container logs
         dc ps                  List running containers
+
+      Vibe coding (CLIs)
+        gh                     GitHub CLI       (run: gh auth login)
+        glab                   GitLab CLI       (run: glab auth login --hostname <host>)
+        claude                 Claude Code CLI  (run: claude)
+        copilot                GitHub Copilot CLI (already running in right pane)
+
+      2-column layout (tmux)
+        Click any pane          switch focus (mouse is on)
+        Ctrl+B then ←/→/↑/↓     move focus by direction
+        Ctrl+B then o           cycle to next pane
+        Ctrl+B then {  /  }     swap current pane with previous / next
+        Ctrl+B then z           zoom current pane fullscreen (toggle)
+        Ctrl+B then d           detach (your session keeps running)
+        BOARD_NO_TMUX=1 ssh …   skip the layout (plain bash)
+        just ssh <vm> --plain   same, via the just recipe
 
       Projects
         ~/projects/        your project workspace
@@ -959,7 +1116,8 @@ runcmd:
   - su - devuser -c "mkdir -p ~/.config/systemd/user && systemctl --user daemon-reload && systemctl --user enable --now board-check.timer" || true
 
   # ── Idle-aware shutdown: passwordless poweroff for devuser ──
-  - echo "devuser ALL=(ALL) NOPASSWD: /sbin/poweroff" > /etc/sudoers.d/board-idle-shutdown
+  - |
+    echo 'devuser ALL=(ALL) NOPASSWD: /sbin/poweroff' > /etc/sudoers.d/board-idle-shutdown
   - chmod 440 /etc/sudoers.d/board-idle-shutdown
 
   # ── Enable idle shutdown timer ──

@@ -3,14 +3,8 @@
 
 // ── Parameters ──
 
-@description('Azure region for all resources')
-param location string = 'australiaeast'
-
-@description('Environment identifier for naming and tagging')
-param environment string = 'personal'
-
-@description('Short region code for naming convention')
-param regionShort string = 'aue'
+@description('Azure region for all resources. Defaults to the resource group location.')
+param location string = resourceGroup().location
 
 @maxLength(12)
 @description('Developer username (lowercase, alphanumeric)')
@@ -80,8 +74,12 @@ param useEntraIdLogin bool = true
 @description('Tenant ID to lock AADSSHLogin extension to. Required when useEntraIdLogin is true.')
 param entraLoginTenantId string = ''
 
-@description('Entra ID object ID of the developer. Gets VM Administrator Login role. Required when useEntraIdLogin is true.')
+@description('Entra ID object ID of the principal (user or group). Gets VM Administrator Login role. Required when useEntraIdLogin is true.')
 param entraLoginPrincipalId string = ''
+
+@description('Type of the Entra ID principal: User or Group')
+@allowed(['User', 'Group'])
+param entraLoginPrincipalType string = 'User'
 
 @description('Resource ID of Key Vault for project secrets (empty = skip)')
 param keyVaultResourceId string = ''
@@ -95,22 +93,29 @@ param vnetAddressPrefix string = '10.0.0.0/16'
 @description('Deployment timestamp (auto-generated, do not set manually)')
 param deploymentTimestamp string = utcNow('yyyy-MM-dd')
 
+@description('Additional tags to apply to every resource (e.g. tenant-mandated tags). Merged with built-in tags.')
+param extraTags object = {}
+
 // ── Variables ──
 
-var prefix = '${environment}-${regionShort}-devvm'
+// Strip the conventional 'rg-' prefix off the resource group name to use as a
+// naming prefix. This keeps resource names short and predictable across all
+// RG naming schemes (e.g. rg-platform-prod -> platform-prod).
+var rgName = resourceGroup().name
+var prefix = startsWith(rgName, 'rg-') ? substring(rgName, 3) : rgName
 var vmName = 'vm-${prefix}-${developerName}'
 var cloudInitRaw = loadTextContent('cloud-init/cloud-init.yaml')
 var cloudInit1 = replace(cloudInitRaw, '__BOARD_HOSTNAME__', 'devvm-${developerName}')
 var cloudInit2 = replace(cloudInit1, '__SHUTDOWN_START_HOUR__', substring(autoShutdownTime, 0, 2))
 var cloudInitContent = replace(cloudInit2, '__SHUTDOWN_BACKSTOP_HOUR__', substring(backstopShutdownTime, 0, 2))
-var commonTags = {
+var builtInTags = {
   project: 'devvm'
-  environment: environment
   owner: developerName
   'managed-by': 'bicep'
   'auth-method': useEntraIdLogin ? 'entra-id' : 'ssh-key'
   created: deploymentTimestamp
 }
+var commonTags = union(builtInTags, extraTags)
 
 // ── NSG Rules ──
 
@@ -202,6 +207,7 @@ module publicIp 'br/public:avm/res/network/public-ip-address:0.12.0' = if (enabl
     tags: commonTags
     skuName: 'Standard'
     publicIPAllocationMethod: 'Static'
+    availabilityZones: []
     ddosSettings: null
     dnsSettings: {
       domainNameLabel: 'devvm-${developerName}'
@@ -345,8 +351,8 @@ module kvRole './modules/keyvault-role.bicep' = if (keyVaultResourceId != '') {
 module vmLoginRoles './modules/vm-login-roles.bicep' = if (useEntraIdLogin && !empty(entraLoginPrincipalId)) {
   name: 'vm-login-roles'
   params: {
-    vmName: vm.outputs.name
     principalId: entraLoginPrincipalId
+    principalType: entraLoginPrincipalType
   }
 }
 

@@ -1,0 +1,15 @@
+# Extra tags applied to the resource group and every Bicep-deployed resource.
+#
+# 1. Copy this file to board.tags.yaml (which is gitignored).
+# 2. Replace these example keys/values with whatever your tenant's Azure Policy requires.
+# 3. Run `just board` and answer "yes" at the "Include extra tags?" prompt.
+#
+# Tag keys and values are passed verbatim to Azure — use any keys your policy mandates.
+# Quote values containing spaces. Azure tag values must be strings.
+
+tags:
+  Environment: "dev"
+  Owner: "you@example.com"
+  CostCenter: "CC-1234"
+  Project: "board"
+  ManagedBy: "platform-team"

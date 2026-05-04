@@ -16,6 +16,11 @@ from board.core.errors import SSHError
 if TYPE_CHECKING:
     from board.ui.console import Console
 
+# Stall thresholds for the cloud-init progress poller. If the latest log line
+# stays identical for STALL_WARN_S we surface a warning; STALL_FAIL_S we abort.
+STALL_WARN_S = 120.0
+STALL_FAIL_S = 300.0
+
 
 async def wait_for_cloud_init(
     hostname: str,
@@ -101,6 +106,13 @@ async def wait_for_cloud_init(
     stale_done_count = 0
     marker_seen = False
 
+    # Stall detection: if the cloud-init log's last line stays identical for
+    # too long, a step has wedged. Without this, a hang renders as ticking
+    # progress (the poller just re-prints the latest line every cycle).
+    last_progress_raw: str | None = None
+    last_progress_change = elapsed_secs()
+    stall_warned = False
+
     while elapsed_secs() < max_wait:
         try:
             async with SSHSession() as ssh:
@@ -111,7 +123,8 @@ async def wait_for_cloud_init(
                     "timeout 10 cloud-init status 2>/dev/null || echo 'status: unknown'",
                     check=False,
                 )
-                ci_output = result.stdout or "status: unknown"
+                ci_raw = result.stdout or "status: unknown"
+                ci_output = ci_raw.decode() if isinstance(ci_raw, bytes) else ci_raw
 
                 # Check marker file
                 marker_result = await ssh.run(
@@ -195,23 +208,49 @@ async def wait_for_cloud_init(
                 elif "status: running" in ci_output:
                     stale_done_count = 0  # Reset when actively running
 
-                # Show progress from cloud-init log
+                # Show progress from cloud-init log + detect stalls
+                progress_result = await ssh.run(
+                    "tail -5 /var/log/cloud-init-output.log 2>/dev/null "
+                    "| grep -v '^$' | tail -1 | tr -cd '[:print:] ' | cut -c1-80",
+                    check=False,
+                )
+                progress_bytes = progress_result.stdout if progress_result.stdout else ""
+                progress_str = (
+                    progress_bytes.decode() if isinstance(progress_bytes, bytes) else progress_bytes
+                )
+                progress_raw = progress_str.strip()
+
+                if progress_raw != last_progress_raw:
+                    last_progress_raw = progress_raw
+                    last_progress_change = elapsed_secs()
+                    stall_warned = False
+                stall_age = elapsed_secs() - last_progress_change
+
+                if stall_age > STALL_FAIL_S and progress_raw:
+                    if console:
+                        console.error(
+                            f"Cloud-init stalled — same step for {int(stall_age)}s: {progress_raw}"
+                        )
+                        console.info(
+                            "Debug: board vm ssh <name>, then: "
+                            "sudo tail -50 /var/log/cloud-init-output.log"
+                        )
+                    raise SSHError(f"Cloud-init stalled {int(stall_age)}s on: {progress_raw}")
+
                 if console:
-                    progress_result = await ssh.run(
-                        "tail -5 /var/log/cloud-init-output.log 2>/dev/null "
-                        "| grep -v '^$' | tail -1 | tr -cd '[:print:] ' | cut -c1-80",
-                        check=False,
-                    )
-                    progress_raw = progress_result.stdout if progress_result.stdout else ""
-                    progress_str = (
-                        progress_raw.decode() if isinstance(progress_raw, bytes) else progress_raw
-                    )
-                    progress = progress_str.strip()
-                    if not progress:
-                        progress = "Installing development tools..."
-                    if any(w in progress.lower() for w in ["complete", "ready for development"]):
-                        progress = "Finalising installation..."
-                    console.info(f"  {progress} ({elapsed()})")
+                    display = progress_raw or "Installing development tools..."
+                    if any(w in display.lower() for w in ["complete", "ready for development"]):
+                        display = "Finalising installation..."
+                    if stall_age > STALL_WARN_S:
+                        if not stall_warned:
+                            console.warn(
+                                f"Same step for {int(stall_age)}s — will fail at "
+                                f"{int(STALL_FAIL_S)}s if no progress"
+                            )
+                            stall_warned = True
+                        console.info(f"  {display} (stalled {int(stall_age)}s, {elapsed()})")
+                    else:
+                        console.info(f"  {display} ({elapsed()})")
 
         except SSHError:
             raise

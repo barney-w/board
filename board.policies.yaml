@@ -1,5 +1,4 @@
 # Board Policies — enforced by CLI before provisioning.
-# See: plan-devtestlabs-parity-and-security.md Part 2 (Priority 2)
 
 max_vms_per_user: 1
 max_vms_total: 20
@@ -11,6 +10,9 @@ allowed_vm_sizes:
 
 allowed_regions:
   - australiaeast
+  - australiasoutheast
+  - australiacentral
+  - australiacentral2
 
 auto_shutdown:
   enabled: true
@@ -30,3 +32,4 @@ expiration:
 
 require_entra_auth: true
 require_mfa: true
+security_group_name: "Board VM Users"
