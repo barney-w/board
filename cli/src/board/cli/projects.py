@@ -64,12 +64,10 @@ def install_projects_command(
                 needs.append(f"clone auth ({', '.join(sorted(repo_kv))})")
             if env_kv:
                 needs.append(f"env vars ({', '.join(sorted(env_kv))})")
-            con.error(
-                "Selected projects require a Key Vault for "
-                + " and ".join(needs)
-                + "."
+            con.error("Selected projects require a Key Vault for " + " and ".join(needs) + ".")
+            con.info(
+                f"Re-run with --keyvault NAME, e.g. board install-projects {name} --keyvault kv-devvm-{name}"
             )
-            con.info(f"Re-run with --keyvault NAME, e.g. board install-projects {name} --keyvault kv-devvm-{name}")
             raise typer.Exit(1)
 
         from board.provision.orchestrator import provision_projects
