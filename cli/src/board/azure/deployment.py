@@ -7,7 +7,9 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+from azure.core.exceptions import ResourceNotFoundError
 from azure.mgmt.authorization import AuthorizationManagementClient
+from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.deployments.aio import DeploymentsMgmtClient
 from azure.mgmt.resource.deployments.models import (
@@ -255,3 +257,106 @@ async def verify_resource_group(
     location = rg.location or ""
     tags = dict(rg.tags) if rg.tags else {}
     return location, tags
+
+
+async def ensure_network(
+    credential: Any,
+    subscription_id: str,
+    resource_group: str,
+    prefix: str,
+    location: str,
+    tags: dict[str, str],
+    network_bicep_path: Path,
+) -> tuple[str, str]:
+    """Ensure the shared per-RG vnet+subnet exists. Create if missing.
+
+    The vnet is named ``vnet-{prefix}`` and the subnet ``snet-{prefix}``.
+    Multiple boards in the same RG share this network; this helper is
+    idempotent at the "does it exist?" level. If the vnet exists with a
+    different CIDR than network.bicep declares, the subsequent VM deploy
+    will fail loud at ARM ``existing`` resolution — by design.
+
+    Args:
+        credential: Azure credential (e.g. DefaultAzureCredential).
+        subscription_id: Target subscription.
+        resource_group: Target resource group (must already exist).
+        prefix: Naming prefix (rgName minus any "rg-" prefix).
+        location: Azure region for the new vnet (only used on create).
+        tags: Tags to apply to the new vnet+subnet (already merged with
+            extraTags by the caller). Ignored when reusing an existing vnet.
+        network_bicep_path: Path to ``infra/modules/network.bicep``.
+
+    Returns:
+        ``(vnet_resource_id, subnet_resource_id)``.
+
+    Raises:
+        DeploymentError: If a network deploy is needed and fails.
+        BoardError: If the vnet exists but the expected subnet does not, or
+            if either is in a non-Succeeded provisioning state.
+    """
+    network_client = NetworkManagementClient(credential, subscription_id)
+    vnet_name = f"vnet-{prefix}"
+    subnet_name = f"snet-{prefix}"
+
+    try:
+        vnet = await asyncio.to_thread(
+            network_client.virtual_networks.get,
+            resource_group,
+            vnet_name,
+        )
+    except ResourceNotFoundError:
+        vnet = None
+
+    if vnet is not None:
+        # Existing vnet — verify the expected subnet exists and is healthy.
+        state = getattr(vnet, "provisioning_state", None)
+        if state and state != "Succeeded":
+            msg = (
+                f"vnet-{prefix} exists in '{resource_group}' but is in state "
+                f"'{state}'. Wait for it to settle, then retry."
+            )
+            raise BoardError(msg)
+        try:
+            subnet = await asyncio.to_thread(
+                network_client.subnets.get,
+                resource_group,
+                vnet_name,
+                subnet_name,
+            )
+        except ResourceNotFoundError as exc:
+            msg = (
+                f"vnet-{prefix} exists in '{resource_group}' but the expected "
+                f"subnet '{subnet_name}' is missing. Delete the vnet (or rename "
+                f"the resource group) and retry."
+            )
+            raise BoardError(msg) from exc
+        sub_state = getattr(subnet, "provisioning_state", None)
+        if sub_state and sub_state != "Succeeded":
+            msg = (
+                f"subnet '{subnet_name}' in '{resource_group}' is in state "
+                f"'{sub_state}'. Wait for it to settle, then retry."
+            )
+            raise BoardError(msg)
+        if not vnet.id or not subnet.id:
+            msg = (
+                f"vnet-{prefix} or subnet '{subnet_name}' in '{resource_group}' "
+                f"returned without a resource ID. Re-run after Azure settles."
+            )
+            raise BoardError(msg)
+        return vnet.id, subnet.id
+
+    # Vnet is missing — deploy network.bicep into the RG.
+    template = await bicep_build(network_bicep_path)
+    outputs = await deploy(
+        credential,
+        subscription_id,
+        resource_group,
+        template,
+        parameters={
+            "prefix": prefix,
+            "location": location,
+            "tags": tags,
+        },
+        deployment_name=f"network-{prefix}-{int(time.time())}",
+    )
+    return outputs["vnetResourceId"], outputs["subnetResourceId"]
