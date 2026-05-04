@@ -36,26 +36,37 @@ if [[ -z "$PASS" ]]; then
     exit 1
 fi
 
-# Install extension (skip if already installed to avoid unnecessary reload)
-if code --list-extensions 2>/dev/null | grep -qi "barney-w.board"; then
-    echo "  Board extension already installed."
-else
-    echo "  Installing Board extension..."
-    if ! code --install-extension "$VSIX"; then
-        echo "  WARNING: Extension install may have failed."
-        echo "  Try opening VS Code and installing $VSIX manually."
-    fi
-    echo "  Done."
-    # Give VS Code time to load the new extension before opening the file
-    sleep 3
+# Always install the bundled extension with --force so the version shipped
+# with this pass wins over any older installed version. Idempotent when the
+# bundled version matches what's already installed.
+echo "  Installing Board extension..."
+if ! code --install-extension "$VSIX" --force; then
+    echo "  WARNING: Extension install may have failed."
+    echo "  Try opening VS Code and installing $VSIX manually."
 fi
+echo "  Done."
+# Give VS Code time to load the new extension before opening the file
+sleep 3
 echo ""
+
+# Detect auth method from the board pass JSON (requires python3 or python)
+AUTH_METHOD="ssh-key"
+if command -v python3 &>/dev/null; then
+    AUTH_METHOD="$(python3 -c "import json,sys; d=json.load(open('$PASS')); print(d.get('authMethod','ssh-key'))" 2>/dev/null || echo "ssh-key")"
+elif command -v python &>/dev/null; then
+    AUTH_METHOD="$(python -c "import json,sys; d=json.load(open('$PASS')); print(d.get('authMethod','ssh-key'))" 2>/dev/null || echo "ssh-key")"
+fi
 
 # Open the board pass in VS Code (triggers the import flow)
 echo "  Opening your board pass in VS Code..."
 code "$PASS"
 echo ""
 echo "  VS Code is now importing your board pass."
-echo "  For SSH-key boards, enter the passphrase your team lead gave you."
+if [[ "$AUTH_METHOD" == "entra-id" ]]; then
+    echo "  No passphrase needed — Entra ID handles authentication."
+    echo "  Click Connect when VS Code is ready."
+else
+    echo "  Enter the passphrase your team lead gave you."
+fi
 echo ""
 read -p "  Press Enter to close this window..."

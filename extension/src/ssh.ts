@@ -60,7 +60,8 @@ export function buildEntraIdConfigBlock(config: BoardConfig, entraUser?: string)
     '    ForwardAgent yes',
     '    ServerAliveInterval 60',
     '    ServerAliveCountMax 3',
-    '    LocalForward 8080 127.0.0.1:8080',
+    '    StrictHostKeyChecking accept-new',
+    '    LocalForward 18080 127.0.0.1:8080',
     '    LocalForward 9091 127.0.0.1:9190',
     '    LocalForward 9444 127.0.0.1:9443',
   );

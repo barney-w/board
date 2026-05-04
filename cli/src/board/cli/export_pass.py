@@ -17,9 +17,6 @@ from board.core import config as cfg
 from board.ui import console as con
 from board.ui import prompts
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
-
 
 def _resolve_auth_method(rg: str, vm: str) -> str:
     """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
@@ -56,13 +53,11 @@ def _find_vsix() -> Path | None:
 
 async def _run_export_pass(
     name: str = "",
-    environment: str = "",
+    resource_group: str = "",
     region: str = "",
-    region_short: str = "",
     auth_override: str = "",
 ) -> None:
     """Create a board pass (plaintext for Entra ID, encrypted for SSH-key)."""
-    # Resolve parameters
     if not name:
         name = await prompts.input_validated(
             "Developer name",
@@ -70,18 +65,31 @@ async def _run_export_pass(
             message="Must be lowercase, start with a letter, max 12 chars",
         )
 
-    if not environment:
-        environment = await prompts.input_text("Environment", default="personal")
-    region = region or DEFAULT_LOCATION
-    region_short = region_short or DEFAULT_REGION
+    if not resource_group:
+        resource_group = await prompts.input_text("Resource group")
+    if not resource_group:
+        con.error("Resource group is required.")
+        return
 
-    # Derive names
+    # If region wasn't passed in, ask Azure for the RG location.
+    if not region:
+        loc_result = subprocess.run(  # noqa: S603, S607
+            ["az", "group", "show", "--name", resource_group, "--query", "location", "-o", "tsv"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        region = loc_result.stdout.strip()
+        if not region:
+            con.error(f"Could not resolve location for resource group '{resource_group}'.")
+            return
+
+    rg = resource_group
+    vm = cfg.vm_name(rg, name)
     fqdn = cfg.hostname(name, region)
-    rg = cfg.resource_group(environment, region_short)
-    vm = cfg.vm_name(environment, region_short, name)
 
     # Verify the VM exists before generating a pass
-    vm_check = subprocess.run(
+    vm_check = subprocess.run(  # noqa: S603, S607
         ["az", "vm", "show", "--resource-group", rg, "--name", vm, "--query", "name", "-o", "tsv"],
         capture_output=True,
         text=True,
@@ -89,8 +97,8 @@ async def _run_export_pass(
     )
     if vm_check.returncode != 0 or not vm_check.stdout.strip():
         con.error(f"VM not found: {vm} in {rg}")
-        con.info("Check the developer name and environment are correct.")
-        con.info(f"List VMs with: board vm ls --env {environment}")
+        con.info("Check the developer name and resource group are correct.")
+        con.info(f"List VMs with: board vm ls --rg {rg}")
         return
 
     # Auth method: override or auto-detect from VM tag
@@ -125,9 +133,7 @@ async def _run_export_pass(
 
     payload = build_payload(
         developer_name=name,
-        environment=environment,
         region=region,
-        region_short=region_short,
         hostname=fqdn,
         username="devuser",
         auth_method=auth_method,
@@ -186,9 +192,8 @@ async def _run_export_pass(
     if vsix_path:
         board_pass_png = render_board_pass_png(
             developer_name=name,
-            environment=environment,
+            resource_group=rg,
             region=region,
-            region_short=region_short,
             vm_name=vm,
             auth_method=auth_method,
             issued_at=payload.issued_at or "",
@@ -215,9 +220,8 @@ async def _run_export_pass(
 
     render_boarding_pass(
         name=name,
-        environment=environment,
+        resource_group=rg,
         region=region,
-        region_short=region_short,
         hostname=fqdn,
         auth_method=auth_method,
         filename=bundle_filename,
@@ -238,9 +242,12 @@ async def _run_export_pass(
 
 def export_pass_command(
     name: str = typer.Argument("", help="Developer name (e.g. jbloggs)."),
-    environment: str = typer.Option("", "--env", help="Environment name."),
-    region: str = typer.Option("", "--region", help="Azure region."),
-    region_short: str = typer.Option("", "--region-short", help="Short region code."),
+    rg: str = typer.Option("", "--rg", help="Resource group the VM lives in."),
+    region: str = typer.Option(
+        "",
+        "--region",
+        help="Azure region (defaults to the resource group's location).",
+    ),
     auth: str = typer.Option(
         "",
         "--auth",
@@ -248,4 +255,4 @@ def export_pass_command(
     ),
 ) -> None:
     """Create a board pass for a developer."""
-    asyncio.run(_run_export_pass(name, environment, region, region_short, auth_override=auth))
+    asyncio.run(_run_export_pass(name, rg, region, auth_override=auth))

@@ -19,9 +19,7 @@ export interface BrowserIdeConfig {
 
 export interface BundlePayload {
   developerName: string;
-  environment: string;
   region: string;
-  regionShort: string;
   hostname: string;
   username: string;
   authMethod: 'ssh-key' | 'entra-id';
@@ -229,15 +227,10 @@ export async function importBundle(
     payload.developerName,
     vscode.ConfigurationTarget.Global,
   );
-  await cfg.update(
-    'environment',
-    payload.environment,
-    vscode.ConfigurationTarget.Global,
-  );
   await cfg.update('region', payload.region, vscode.ConfigurationTarget.Global);
   await cfg.update(
-    'regionShort',
-    payload.regionShort,
+    'resourceGroup',
+    payload.resourceGroup,
     vscode.ConfigurationTarget.Global,
   );
   await cfg.update(
