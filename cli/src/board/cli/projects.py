@@ -50,6 +50,28 @@ def install_projects_command(
         if selected_projects:
             con.info(f"Projects: {' '.join(selected_projects)}")
 
+        # Pre-flight: if any selected manifest needs Key Vault auth (env or
+        # repo-clone) and the user did not pass --keyvault, fail loud now
+        # rather than mid-clone with a less obvious error.
+        from board.core.manifest import load_all as load_manifests
+        from board.core.manifest import required_keyvault_secrets
+
+        manifests = load_manifests(manifest_dir, filter_names=selected_projects)
+        env_kv, repo_kv = required_keyvault_secrets(manifests)
+        if (env_kv or repo_kv) and not keyvault:
+            needs = []
+            if repo_kv:
+                needs.append(f"clone auth ({', '.join(sorted(repo_kv))})")
+            if env_kv:
+                needs.append(f"env vars ({', '.join(sorted(env_kv))})")
+            con.error(
+                "Selected projects require a Key Vault for "
+                + " and ".join(needs)
+                + "."
+            )
+            con.info(f"Re-run with --keyvault NAME, e.g. board install-projects {name} --keyvault kv-devvm-{name}")
+            raise typer.Exit(1)
+
         from board.provision.orchestrator import provision_projects
         from board.ssh.session import SSHSession
 

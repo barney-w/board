@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from ruamel.yaml import YAML
 
-from board.models.manifest import ProjectManifest, Service
+from board.models.manifest import ProjectManifest, RepoConfig, Service
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,6 +85,42 @@ def list_projects(directory: Path) -> list[tuple[str, str]]:
         manifest = load(path)
         results.append((manifest.name, manifest.description))
     return results
+
+
+# ── Key Vault requirements ──────────────────────────────────────────────────
+
+
+def required_keyvault_secrets(
+    manifests: list[ProjectManifest],
+) -> tuple[set[str], set[str]]:
+    """Return Key Vault secret names referenced by the given manifests.
+
+    Returns:
+        A pair ``(env_secrets, repo_auth_secrets)``:
+
+        - ``env_secrets``: secrets referenced from any ``env.keyvault_secrets``
+          mapping, used at project-runtime to populate ``.env.local``.
+        - ``repo_auth_secrets``: secrets referenced from ``repo.auth.keyvault_secret``
+          where ``repo.auth.type == "github-token"`` — used at clone time to fetch
+          a GitHub bootstrap token via managed identity.
+
+    A manifest can land in either, both, or neither set. The two are kept
+    separate so callers can phrase prompts/errors precisely (env-time vs
+    clone-time).
+    """
+    env_secrets: set[str] = set()
+    repo_auth_secrets: set[str] = set()
+    for m in manifests:
+        if m.env and m.env.keyvault_secrets:
+            env_secrets.update(m.env.keyvault_secrets.values())
+        if (
+            isinstance(m.repo, RepoConfig)
+            and m.repo.auth is not None
+            and m.repo.auth.type == "github-token"
+            and m.repo.auth.keyvault_secret
+        ):
+            repo_auth_secrets.add(m.repo.auth.keyvault_secret)
+    return env_secrets, repo_auth_secrets
 
 
 # ── Systemd unit generation ─────────────────────────────────────────────────
