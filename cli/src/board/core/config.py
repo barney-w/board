@@ -31,14 +31,18 @@ def hostname(name: str, region: str) -> str:
     return f"devvm-{name}.{region}.cloudapp.azure.com"
 
 
-def resource_group(environment: str, region_short: str) -> str:
-    """rg-{env}-{regionShort}-devvm"""
-    return f"rg-{environment}-{region_short}-devvm"
+def rg_suffix(resource_group_name: str) -> str:
+    """Strip leading 'rg-' from a resource group name to use as a naming prefix.
+
+    rg-platform-prod -> platform-prod
+    my-team -> my-team
+    """
+    return resource_group_name.removeprefix("rg-")
 
 
-def vm_name(environment: str, region_short: str, name: str) -> str:
-    """vm-{env}-{regionShort}-devvm-{name}"""
-    return f"vm-{environment}-{region_short}-devvm-{name}"
+def vm_name(resource_group_name: str, name: str) -> str:
+    """vm-{rg-suffix}-{name}"""
+    return f"vm-{rg_suffix(resource_group_name)}-{name}"
 
 
 def ssh_key_path(name: str) -> str:
@@ -78,27 +82,44 @@ def is_dry_run() -> bool:
     return os.environ.get("BOARD_DRY_RUN", "").lower() in ("1", "true", "yes")
 
 
-# ── Bicepparam discovery ──
+# ── Bicepparam preset loading ──
+
+# Keys that the wizard recognises in a preset file. Anything else is ignored.
+_PRESET_KEYS = {
+    "resourceGroup",
+    "location",
+    "vmSku",
+    "allowedSshSourceIP",
+    "enableAutoStart",
+    "autoStartTime",
+}
 
 
-def discover_bicepparams(infra_dir: Path | None = None) -> list[tuple[str, Path]]:
-    """Find all .bicepparam files and extract environment names.
+def load_preset(path: Path) -> dict[str, str]:
+    """Parse a bicepparam preset file and return a dict of recognised values.
 
-    Returns list of (environment_name, file_path) tuples.
-    Looks in infra/config/*.bicepparam relative to the project root.
+    Only handles ``param key = 'value'`` lines (plus bool literals). Anything
+    more complex (objects, references) is ignored — presets are meant for
+    simple defaults the wizard can pre-fill.
     """
-    if infra_dir is None:
-        infra_dir = _find_infra_dir()
-    config_dir = infra_dir / "config"
-    if not config_dir.is_dir():
-        return []
-    params = []
-    for p in sorted(config_dir.glob("*.bicepparam")):
-        env_name = p.stem
-        if env_name == "example":
+    if not path.is_file():
+        msg = f"Preset file not found: {path}"
+        raise FileNotFoundError(msg)
+    out: dict[str, str] = {}
+    pat = re.compile(r"^\s*param\s+(\w+)\s*=\s*(.+?)\s*(?://.*)?$")
+    for line in path.read_text().splitlines():
+        m = pat.match(line)
+        if not m:
             continue
-        params.append((env_name, p))
-    return params
+        key, raw = m.group(1), m.group(2).strip()
+        if key not in _PRESET_KEYS:
+            continue
+        if raw.startswith(("'", '"')) and raw.endswith(("'", '"')):
+            out[key] = raw[1:-1]
+        elif raw in ("true", "false"):
+            out[key] = raw
+        # else: skip — not a simple literal
+    return out
 
 
 def _find_infra_dir() -> Path:

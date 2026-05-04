@@ -275,9 +275,8 @@ class TestBoardingPass:
     def _render(self, **overrides: str) -> str:
         defaults = {
             "name": "jbloggs",
-            "environment": "personal",
+            "resource_group": "rg-platform-prod",
             "region": "australiaeast",
-            "region_short": "aue",
             "hostname": "devvm-jbloggs.australiaeast.cloudapp.azure.com",
             "auth_method": "SSH Key",
             "filename": "jbloggs.board",
@@ -309,9 +308,9 @@ class TestBoardingPass:
         output = self._render()
         assert "jbloggs" in output
 
-    def test_contains_environment(self) -> None:
+    def test_contains_resource_group(self) -> None:
         output = self._render()
-        assert "personal environment" in output
+        assert "rg-platform-prod" in output
 
     def test_contains_region(self) -> None:
         output = self._render()
@@ -319,7 +318,8 @@ class TestBoardingPass:
 
     def test_contains_zone(self) -> None:
         output = self._render()
-        assert "AUE" in output
+        # Zone is the first 3 letters of the region, uppercase
+        assert "AUS" in output
 
     def test_contains_auth_method(self) -> None:
         output = self._render()

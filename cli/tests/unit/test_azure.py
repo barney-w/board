@@ -12,12 +12,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from board.azure.compute import list_vms
-from board.azure.deployment import bicep_build, deploy, ensure_resource_group
+from board.azure.deployment import bicep_build, deploy, verify_resource_group
 from board.azure.keyvault import (
     create_or_recover_vault,
+    ensure_secrets_officer_role,
     get_secret,
     list_secrets,
     set_secret,
+    set_secret_with_propagation_retry,
 )
 from board.core.errors import BoardError, DeploymentError
 
@@ -252,98 +254,315 @@ class TestKeyVaultSecrets:
         assert names == ["secret-a", "secret-b", "secret-c"]
 
 
-# ── Resource Group Tests ──
+class TestSetSecretWithPropagationRetry:
+    """RBAC for a freshly granted role can take 30s-2min to propagate;
+    set_secret_with_propagation_retry retries on Forbidden then fails loud."""
 
-
-class TestEnsureResourceGroup:
     @pytest.mark.asyncio
-    async def test_rg_already_exists(self) -> None:
-        """If RG exists and is Succeeded, do nothing."""
+    async def test_succeeds_first_try(self) -> None:
         mock_client = MagicMock()
-        mock_client.resource_groups.check_existence.return_value = True
-        mock_client.resource_groups.get.return_value = SimpleNamespace(
-            properties=SimpleNamespace(provisioning_state="Succeeded"),
+
+        with patch("board.azure.keyvault.SecretClient", return_value=mock_client):
+            await set_secret_with_propagation_retry(
+                "https://kv.vault.azure.net/",
+                MagicMock(),
+                "k",
+                "v",
+                max_retries=3,
+                delay_seconds=0,
+            )
+
+        mock_client.set_secret.assert_called_once_with("k", "v")
+
+    @pytest.mark.asyncio
+    async def test_retries_then_succeeds(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        forbidden = HttpResponseError(message="ForbiddenByRbac")
+        forbidden.status_code = 403  # type: ignore[attr-defined]
+
+        mock_client = MagicMock()
+        mock_client.set_secret.side_effect = [forbidden, forbidden, None]
+
+        with patch("board.azure.keyvault.SecretClient", return_value=mock_client):
+            await set_secret_with_propagation_retry(
+                "https://kv.vault.azure.net/",
+                MagicMock(),
+                "k",
+                "v",
+                max_retries=5,
+                delay_seconds=0,
+            )
+
+        assert mock_client.set_secret.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_fails_after_max_retries(self) -> None:
+        from azure.core.exceptions import HttpResponseError
+
+        forbidden = HttpResponseError(message="ForbiddenByRbac")
+        forbidden.status_code = 403  # type: ignore[attr-defined]
+
+        mock_client = MagicMock()
+        mock_client.set_secret.side_effect = forbidden
+
+        with (
+            patch("board.azure.keyvault.SecretClient", return_value=mock_client),
+            pytest.raises(BoardError, match="after .* of retries"),
+        ):
+            await set_secret_with_propagation_retry(
+                "https://kv.vault.azure.net/",
+                MagicMock(),
+                "k",
+                "v",
+                max_retries=2,
+                delay_seconds=0,
+            )
+
+        assert mock_client.set_secret.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_forbidden_error_fails_immediately(self) -> None:
+        """Non-403 errors are not transient — fail fast without retrying."""
+        from azure.core.exceptions import HttpResponseError
+
+        bad_request = HttpResponseError(message="BadParameter")
+        bad_request.status_code = 400  # type: ignore[attr-defined]
+
+        mock_client = MagicMock()
+        mock_client.set_secret.side_effect = bad_request
+
+        with (
+            patch("board.azure.keyvault.SecretClient", return_value=mock_client),
+            pytest.raises(BoardError, match="Failed to set secret"),
+        ):
+            await set_secret_with_propagation_retry(
+                "https://kv.vault.azure.net/",
+                MagicMock(),
+                "k",
+                "v",
+                max_retries=5,
+                delay_seconds=0,
+            )
+
+        assert mock_client.set_secret.call_count == 1
+
+
+class TestEnsureSecretsOfficerRole:
+    @pytest.mark.asyncio
+    async def test_skips_if_already_assigned(self) -> None:
+        existing = SimpleNamespace(
+            role_definition_id=(
+                "/subscriptions/sub/providers/Microsoft.Authorization"
+                "/roleDefinitions/b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
+            ),
         )
+        mock_client = MagicMock()
+        mock_client.role_assignments.list_for_scope.return_value = [existing]
 
         with patch(
-            "board.azure.deployment.ResourceManagementClient",
+            "board.azure.keyvault.AuthorizationManagementClient",
             return_value=mock_client,
         ):
-            await ensure_resource_group(
+            await ensure_secrets_officer_role(MagicMock(), "sub", "/vault/id", "principal-1")
+
+        mock_client.role_assignments.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_creates_assignment_when_missing(self) -> None:
+        mock_client = MagicMock()
+        mock_client.role_assignments.list_for_scope.return_value = []
+
+        with patch(
+            "board.azure.keyvault.AuthorizationManagementClient",
+            return_value=mock_client,
+        ):
+            await ensure_secrets_officer_role(MagicMock(), "sub", "/vault/id", "principal-1")
+
+        mock_client.role_assignments.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_boarderror_on_create_failure(self) -> None:
+        """Caller lacking roleAssignments/write should fail loud, not warn."""
+        from azure.core.exceptions import HttpResponseError
+
+        denied = HttpResponseError(message="AuthorizationFailed")
+        mock_client = MagicMock()
+        mock_client.role_assignments.list_for_scope.return_value = []
+        mock_client.role_assignments.create.side_effect = denied
+
+        with (
+            patch(
+                "board.azure.keyvault.AuthorizationManagementClient",
+                return_value=mock_client,
+            ),
+            pytest.raises(BoardError, match="Could not assign 'Key Vault Secrets Officer'"),
+        ):
+            await ensure_secrets_officer_role(MagicMock(), "sub", "/vault/id", "principal-1")
+
+
+# ── Resource Group Verification Tests ──
+
+
+def _rg_object(state: str = "Succeeded", location: str = "australiaeast") -> SimpleNamespace:
+    return SimpleNamespace(
+        properties=SimpleNamespace(provisioning_state=state),
+        location=location,
+        tags={"environment": "dev"},
+    )
+
+
+def _role_assignment(role_id: str) -> SimpleNamespace:
+    """Return a mock RoleAssignment with a fully-qualified role definition id."""
+    return SimpleNamespace(
+        role_definition_id=(
+            f"/subscriptions/sub-123/providers/Microsoft.Authorization/roleDefinitions/{role_id}"
+        ),
+    )
+
+
+CONTRIBUTOR = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+OWNER = "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
+READER = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+
+
+class TestVerifyResourceGroup:
+    @pytest.mark.asyncio
+    async def test_succeeds_with_contributor(self) -> None:
+        """Caller has Contributor on a Succeeded RG -- returns location + tags."""
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object()
+
+        am = MagicMock()
+        am.role_assignments.list_for_scope.return_value = iter([_role_assignment(CONTRIBUTOR)])
+
+        with (
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            patch("board.azure.deployment.AuthorizationManagementClient", return_value=am),
+        ):
+            location, tags = await verify_resource_group(
                 credential=MagicMock(),
                 subscription_id="sub-123",
                 name="rg-test",
-                location="australiaeast",
+                principal_id="oid-123",
             )
 
-        mock_client.resource_groups.create_or_update.assert_not_called()
+        assert location == "australiaeast"
+        assert tags == {"environment": "dev"}
 
     @pytest.mark.asyncio
-    async def test_rg_does_not_exist_creates(self) -> None:
-        """If RG doesn't exist, create it."""
-        mock_client = MagicMock()
-        mock_client.resource_groups.check_existence.return_value = False
+    async def test_succeeds_with_owner(self) -> None:
+        """Owner is also accepted."""
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object()
 
-        with patch(
-            "board.azure.deployment.ResourceManagementClient",
-            return_value=mock_client,
+        am = MagicMock()
+        am.role_assignments.list_for_scope.return_value = iter([_role_assignment(OWNER)])
+
+        with (
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            patch("board.azure.deployment.AuthorizationManagementClient", return_value=am),
         ):
-            await ensure_resource_group(
+            await verify_resource_group(
                 credential=MagicMock(),
                 subscription_id="sub-123",
-                name="rg-new",
-                location="australiaeast",
+                name="rg-test",
+                principal_id="oid-123",
             )
 
-        mock_client.resource_groups.create_or_update.assert_called_once()
-        call_args = mock_client.resource_groups.create_or_update.call_args
-        assert call_args[0][0] == "rg-new"
-        assert call_args[0][1].location == "australiaeast"
+    @pytest.mark.asyncio
+    async def test_rg_missing_raises(self) -> None:
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = False
+
+        with (
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            pytest.raises(BoardError, match="not found"),
+        ):
+            await verify_resource_group(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                name="rg-missing",
+                principal_id="oid-123",
+            )
 
     @pytest.mark.asyncio
     async def test_rg_deleting_raises(self) -> None:
-        """If RG is in Deleting state, raise DeploymentError."""
-        mock_client = MagicMock()
-        mock_client.resource_groups.check_existence.return_value = True
-        mock_client.resource_groups.get.return_value = SimpleNamespace(
-            properties=SimpleNamespace(provisioning_state="Deleting"),
-        )
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object(state="Deleting")
 
         with (
-            patch(
-                "board.azure.deployment.ResourceManagementClient",
-                return_value=mock_client,
-            ),
-            pytest.raises(DeploymentError, match="being deleted"),
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            pytest.raises(BoardError, match="being deleted"),
         ):
-            await ensure_resource_group(
+            await verify_resource_group(
                 credential=MagicMock(),
                 subscription_id="sub-123",
                 name="rg-test",
-                location="australiaeast",
+                principal_id="oid-123",
             )
 
     @pytest.mark.asyncio
-    async def test_rg_failed_state_raises(self) -> None:
-        """If RG is in a failed state, raise DeploymentError."""
-        mock_client = MagicMock()
-        mock_client.resource_groups.check_existence.return_value = True
-        mock_client.resource_groups.get.return_value = SimpleNamespace(
-            properties=SimpleNamespace(provisioning_state="Failed"),
-        )
+    async def test_reader_only_raises(self) -> None:
+        """Reader is insufficient -- caller needs Contributor or Owner."""
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object()
+
+        am = MagicMock()
+        am.role_assignments.list_for_scope.return_value = iter([_role_assignment(READER)])
 
         with (
-            patch(
-                "board.azure.deployment.ResourceManagementClient",
-                return_value=mock_client,
-            ),
-            pytest.raises(DeploymentError, match="state 'Failed'"),
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            patch("board.azure.deployment.AuthorizationManagementClient", return_value=am),
+            pytest.raises(BoardError, match="Contributor or Owner"),
         ):
-            await ensure_resource_group(
+            await verify_resource_group(
                 credential=MagicMock(),
                 subscription_id="sub-123",
                 name="rg-test",
-                location="australiaeast",
+                principal_id="oid-123",
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_assignments_raises(self) -> None:
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object()
+
+        am = MagicMock()
+        am.role_assignments.list_for_scope.return_value = iter([])
+
+        with (
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            patch("board.azure.deployment.AuthorizationManagementClient", return_value=am),
+            pytest.raises(BoardError, match="Contributor or Owner"),
+        ):
+            await verify_resource_group(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                name="rg-test",
+                principal_id="oid-123",
+            )
+
+    @pytest.mark.asyncio
+    async def test_missing_principal_id_raises(self) -> None:
+        rm = MagicMock()
+        rm.resource_groups.check_existence.return_value = True
+        rm.resource_groups.get.return_value = _rg_object()
+
+        with (
+            patch("board.azure.deployment.ResourceManagementClient", return_value=rm),
+            pytest.raises(BoardError, match="signed-in user"),
+        ):
+            await verify_resource_group(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                name="rg-test",
+                principal_id="",
             )
 
 

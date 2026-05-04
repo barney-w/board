@@ -14,18 +14,38 @@ from board.cli import vm_app
 from board.core import config as cfg
 from board.ui import console as con
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
+
+def _resolve_rg(rg_arg: str) -> str:
+    """Pick up --rg or BOARD_RG. Required — fails loud if neither is set."""
+    rg = rg_arg or os.environ.get("BOARD_RG", "")
+    if not rg:
+        con.error("Resource group is required. Pass --rg or set BOARD_RG.")
+        raise typer.Exit(1)
+    return rg
 
 
-def _resolve_env() -> str:
-    return os.environ.get("BOARD_ENVIRONMENT", "personal")
+def _rg_location(rg: str) -> str:
+    """Look up an RG's location via the az CLI. Cached per-process."""
+    cache = getattr(_rg_location, "_cache", {})
+    if rg in cache:
+        return str(cache[rg])
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "group", "show", "--name", rg, "--query", "location", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not resolve location for resource group '{rg}'.")
+        raise typer.Exit(1)
+    location = result.stdout.strip()
+    cache[rg] = location
+    _rg_location._cache = cache  # type: ignore[attr-defined]
+    return location
 
 
-def _resolve_auth_method(name: str, env: str, region_short: str) -> str:
+def _resolve_auth_method(rg: str, vm: str) -> str:
     """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
-    rg = cfg.resource_group(env, region_short)
-    vm = cfg.vm_name(env, region_short, name)
     result = subprocess.run(  # noqa: S603, S607
         [
             "az",
@@ -48,8 +68,44 @@ def _resolve_auth_method(name: str, env: str, region_short: str) -> str:
     return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
 
 
-def _resolve_rg(env: str | None = None) -> str:
-    return cfg.resource_group(env or _resolve_env(), DEFAULT_REGION)
+def _get_power_state(rg: str, vm: str) -> str:
+    """Return the VM power state string, e.g. 'running', 'deallocated'. Returns 'unknown' on error."""
+    result = subprocess.run(  # noqa: S603, S607
+        [
+            "az",
+            "vm",
+            "get-instance-view",
+            "--resource-group",
+            rg,
+            "--name",
+            vm,
+            "--query",
+            "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus|[0]",
+            "-o",
+            "tsv",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    raw = result.stdout.strip().lower()
+    if "running" in raw:
+        return "running"
+    if "deallocated" in raw or "stopped" in raw:
+        return "stopped"
+    return "unknown"
+
+
+async def _start_vm(rg: str, vm: str) -> None:
+    """Start a VM and wait for it to reach running state."""
+    from board.azure.auth import get_credential, get_subscription_id
+    from board.azure.compute import start_vm
+
+    credential = get_credential()
+    sub_id = await get_subscription_id()
+    with con.spin(f"Starting {vm}..."):
+        await start_vm(credential, sub_id, rg, vm)
+    con.success(f"{vm} started")
 
 
 async def _get_azure_context() -> tuple[Any, str]:
@@ -64,19 +120,19 @@ async def _get_azure_context() -> tuple[Any, str]:
 @vm_app.command()
 def start(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
     """Start a developer VM."""
 
     async def _start() -> None:
+        rg_name = _resolve_rg(rg)
         credential, sub_id = await _get_azure_context()
-        rg = _resolve_rg(env or None)
-        vm = cfg.vm_name(env or _resolve_env(), DEFAULT_REGION, name)
+        vm = cfg.vm_name(rg_name, name)
 
         from board.azure.compute import start_vm
 
         with con.spin(f"Starting {vm}..."):
-            await start_vm(credential, sub_id, rg, vm)
+            await start_vm(credential, sub_id, rg_name, vm)
         con.success(f"{vm} started")
 
     asyncio.run(_start())
@@ -85,19 +141,19 @@ def start(
 @vm_app.command()
 def stop(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
     """Stop (deallocate) a developer VM."""
 
     async def _stop() -> None:
+        rg_name = _resolve_rg(rg)
         credential, sub_id = await _get_azure_context()
-        rg = _resolve_rg(env or None)
-        vm = cfg.vm_name(env or _resolve_env(), DEFAULT_REGION, name)
+        vm = cfg.vm_name(rg_name, name)
 
         from board.azure.compute import deallocate_vm
 
         with con.spin(f"Deallocating {vm}..."):
-            await deallocate_vm(credential, sub_id, rg, vm)
+            await deallocate_vm(credential, sub_id, rg_name, vm)
         con.success(f"{vm} deallocated")
 
     asyncio.run(_stop())
@@ -106,16 +162,31 @@ def stop(
 @vm_app.command()
 def ssh(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
+    plain: bool = typer.Option(
+        False,
+        "--plain",
+        help="Skip the 2-column tmux layout, drop into plain bash.",
+    ),
 ) -> None:
     """SSH into a developer VM."""
-    env = _resolve_env()
-    auth_method = _resolve_auth_method(name, env, DEFAULT_REGION)
+    rg_name = _resolve_rg(rg)
+    location = _rg_location(rg_name)
+    vm = cfg.vm_name(rg_name, name)
+
+    # Check VM is running before attempting SSH (avoids silent TCP hang)
+    power_state = _get_power_state(rg_name, vm)
+    if power_state == "stopped":
+        con.warn(f"{vm} is stopped.")
+        if not typer.confirm("Start it now?", default=True):
+            raise typer.Exit(0)
+        asyncio.run(_start_vm(rg_name, vm))
+
+    auth_method = _resolve_auth_method(rg_name, vm)
 
     if auth_method == "entra-id":
         alias = cfg.ssh_host_alias(name)
-        rg = cfg.resource_group(env, DEFAULT_REGION)
-        vm = cfg.vm_name(env, DEFAULT_REGION, name)
-        fqdn = cfg.hostname(name, DEFAULT_LOCATION)
+        fqdn = cfg.hostname(name, location)
         ssh_config_path = Path.home() / ".ssh" / "config"
 
         # 1. Refresh short-lived Entra ID certificates
@@ -127,7 +198,7 @@ def ssh(
         )
 
         con.info("Refreshing Entra ID certificates...")
-        cert_ok, entra_user = refresh_entra_certs(alias, rg, vm)
+        cert_ok, entra_user = refresh_entra_certs(alias, rg_name, vm)
         if not cert_ok:
             con.error("Failed to refresh Entra ID certificates.")
             con.info("Ensure you are signed in: az login")
@@ -143,13 +214,19 @@ def ssh(
 
         # 3. Connect via the SSH alias (picks up LocalForward from config)
         con.info(f"Connecting to {vm}...")
-        con.info("Port forwarding:")
+        con.info("Port forwards (active once connected):")
         for _local_port, _remote_port, label, url in SERVICE_PORTS:
             con.info(f"  {label:15s} {url}")
         con.info("")
-        subprocess.run(["ssh", alias], check=False)  # noqa: S603, S607
+        con.info("Type 'exit' or press Ctrl+D to disconnect.")
+        con.info("Run 'vibe' on the VM for the 2-column tmux workspace.")
+        con.info("")
+        ssh_argv = ["ssh", alias]
+        if plain:
+            ssh_argv += ["-t", "BOARD_NO_TMUX=1 exec bash -l"]
+        subprocess.run(ssh_argv, check=False)  # noqa: S603, S607
     else:
-        fqdn = cfg.hostname(name, DEFAULT_LOCATION)
+        fqdn = cfg.hostname(name, location)
         key_path = cfg.ssh_key_path_expanded(name)
 
         if not key_path.exists():
@@ -158,34 +235,34 @@ def ssh(
             raise typer.Exit(1)
 
         con.info(f"Connecting to {fqdn}...")
-        subprocess.run(  # noqa: S603, S607
-            ["ssh", "-i", str(key_path), f"devuser@{fqdn}"],
-            check=False,
-        )
+        ssh_argv = ["ssh", "-i", str(key_path), f"devuser@{fqdn}"]
+        if plain:
+            ssh_argv += ["-t", "BOARD_NO_TMUX=1 exec bash -l"]
+        subprocess.run(ssh_argv, check=False)  # noqa: S603, S607
 
 
 @vm_app.command()
 def ls(
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
-    """List all VMs in the environment."""
+    """List all VMs in the resource group."""
 
     async def _ls() -> None:
+        rg_name = _resolve_rg(rg)
         credential, sub_id = await _get_azure_context()
-        rg = _resolve_rg(env or None)
 
         from board.azure.compute import list_vms
 
         with con.spin("Loading VMs..."):
-            vms = await list_vms(credential, sub_id, rg)
+            vms = await list_vms(credential, sub_id, rg_name)
 
         if not vms:
-            con.info(f"No VMs found in {rg}")
+            con.info(f"No VMs found in {rg_name}")
             return
 
         from rich.table import Table
 
-        table = Table(title=f"VMs in {rg}")
+        table = Table(title=f"VMs in {rg_name}")
         table.add_column("Name", style="bold")
         table.add_column("Size")
         table.add_column("State")
@@ -211,21 +288,22 @@ def ls(
 @vm_app.command()
 def status(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
     """Show detailed status for a specific VM."""
 
     async def _status() -> None:
+        rg_name = _resolve_rg(rg)
+        location = _rg_location(rg_name)
         credential, sub_id = await _get_azure_context()
-        rg = _resolve_rg(env or None)
-        vm = cfg.vm_name(env or _resolve_env(), DEFAULT_REGION, name)
+        vm = cfg.vm_name(rg_name, name)
 
         from board.azure.compute import get_vm_status
 
         with con.spin(f"Checking {vm}..."):
-            info = await get_vm_status(credential, sub_id, rg, vm)
+            info = await get_vm_status(credential, sub_id, rg_name, vm)
 
-        fqdn = cfg.hostname(name, DEFAULT_LOCATION)
+        fqdn = cfg.hostname(name, location)
         key_path = cfg.ssh_key_path_expanded(name)
 
         con.summary_box(
@@ -248,15 +326,15 @@ def status(
 @vm_app.command()
 def delete(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
     """Delete a developer VM."""
 
     async def _delete() -> None:
+        rg_name = _resolve_rg(rg)
         credential, sub_id = await _get_azure_context()
-        rg = _resolve_rg(env or None)
-        vm = cfg.vm_name(env or _resolve_env(), DEFAULT_REGION, name)
+        vm = cfg.vm_name(rg_name, name)
 
         if not yes:
             con.warn(f"This will permanently delete VM {vm}.")
@@ -267,7 +345,7 @@ def delete(
         from board.azure.compute import delete_vm
 
         with con.spin(f"Deleting {vm}..."):
-            await delete_vm(credential, sub_id, rg, vm)
+            await delete_vm(credential, sub_id, rg_name, vm)
         con.success(f"{vm} deleted")
 
         # Clean up SSH config
@@ -315,11 +393,11 @@ BOARD_ROLES: dict[str, list[dict[str, str]]] = {
     "admin": [
         {"role": "Contributor", "scope": "rg"},
         {"role": "Key Vault Administrator", "scope": "rg"},
-        {"role": "Virtual Machine Administrator Login", "scope": "vm"},
+        {"role": "Virtual Machine Administrator Login", "scope": "rg"},
     ],
     "developer": [
         {"role": "Reader", "scope": "rg"},
-        {"role": "Virtual Machine User Login", "scope": "vm"},
+        {"role": "Virtual Machine User Login", "scope": "rg"},
     ],
     "viewer": [
         {"role": "Reader", "scope": "rg"},
@@ -418,16 +496,15 @@ def grant_access(
     role: str = typer.Option(
         "developer", "--role", "-r", help="Board role: admin, developer, viewer."
     ),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
     """Grant access to a developer VM with a board role (admin/developer/viewer)."""
     if role not in BOARD_ROLES:
         con.error(f"Unknown role: {role}. Must be one of: {', '.join(BOARD_ROLES)}")
         raise typer.Exit(1)
 
-    resolved_env = env or _resolve_env()
-    rg = cfg.resource_group(resolved_env, DEFAULT_REGION)
-    vm_name_str = cfg.vm_name(resolved_env, DEFAULT_REGION, name)
+    rg_name = _resolve_rg(rg)
+    vm_name_str = cfg.vm_name(rg_name, name)
 
     principal_id = _resolve_principal_id(email)
 
@@ -440,9 +517,9 @@ def grant_access(
     needs_vm = any(r["scope"] == "vm" for r in role_defs)
 
     if needs_rg:
-        rg_id = _resolve_rg_resource_id(rg)
+        rg_id = _resolve_rg_resource_id(rg_name)
     if needs_vm:
-        vm_id = _resolve_vm_resource_id(rg, vm_name_str)
+        vm_id = _resolve_vm_resource_id(rg_name, vm_name_str)
 
     con.info(f"Granting '{role}' role to {email}...")
     failures = 0
@@ -460,4 +537,4 @@ def grant_access(
 
     con.success(f"Done. {email} now has '{role}' access.")
     if role != "viewer":
-        con.info(f"SSH: az ssh vm --resource-group {rg} --name {vm_name_str}")
+        con.info(f"SSH: az ssh vm --resource-group {rg_name} --name {vm_name_str}")

@@ -13,8 +13,10 @@ _MARKER_PREFIX = "# BEGIN board:"
 _MARKER_SUFFIX = "# END board:"
 
 # Service port forwarding: (local_port, remote_port, label, local_url)
+# Local ports avoid common dev-tool collisions (8080 → Firebase emulator,
+# Tomcat, etc.); remote ports match the service's bind on the VM.
 SERVICE_PORTS: list[tuple[int, int, str, str]] = [
-    (8080, 8080, "code-server", "http://localhost:8080"),
+    (18080, 8080, "code-server", "http://localhost:18080"),
     (9091, 9190, "Cockpit", "https://localhost:9091"),
     (9444, 9443, "Portainer", "https://localhost:9444"),
 ]
@@ -197,6 +199,7 @@ def build_entra_id_config_block(
             "    ForwardAgent yes",
             "    ServerAliveInterval 60",
             "    ServerAliveCountMax 3",
+            "    StrictHostKeyChecking accept-new",
         ]
     )
     for local_port, remote_port, _label, _url in SERVICE_PORTS:

@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 
 import typer
 
-from board.core import config as cfg
 from board.core.errors import BoardError
 from board.ui import console as con
-
-DEFAULT_REGION = "aue"
 
 
 def costs_command(
     developer: str = typer.Option("", "--developer", "-d", help="Filter by developer name."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     month: str = typer.Option(
         "", "--month", "-m", help="Month in YYYY-MM format (default: current)."
     ),
@@ -27,8 +25,10 @@ def costs_command(
         from board.azure.auth import get_subscription_id
         from board.azure.costs import query_costs
 
-        resolved_env = env or "personal"
-        rg = cfg.resource_group(resolved_env, DEFAULT_REGION)
+        rg_name = rg or os.environ.get("BOARD_RG", "")
+        if not rg_name:
+            con.error("Resource group is required. Pass --rg or set BOARD_RG.")
+            raise typer.Exit(1)
 
         try:
             sub_id = await get_subscription_id()
@@ -48,14 +48,14 @@ def costs_command(
             to_date = now.strftime("%Y-%m-%d")
 
         con.header("Developer VM Costs")
-        con.info(f"Resource group: {rg}")
+        con.info(f"Resource group: {rg_name}")
         con.info(f"Period: {from_date} to {to_date}")
 
         try:
             with con.spin("Querying Cost Management API..."):
                 results = await query_costs(
                     sub_id,
-                    rg,
+                    rg_name,
                     from_date=from_date,
                     to_date=to_date,
                 )

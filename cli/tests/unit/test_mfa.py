@@ -9,7 +9,7 @@ import pytest
 
 from board.azure.mfa import (
     _POLICY_DISPLAY_NAME,
-    BOARD_GROUP_NAME,
+    DEFAULT_GROUP_NAME,
     _resolve_vm_signin_app_id,
     add_member_to_board_group,
     check_mfa_policy,
@@ -136,10 +136,16 @@ class TestFindBoardGroup:
         self._patcher.stop()
 
     async def test_returns_group_id_when_found(self) -> None:
-        group = {"displayName": BOARD_GROUP_NAME, "id": "group-abc-123"}
+        group = {"displayName": DEFAULT_GROUP_NAME, "id": "group-abc-123"}
         self._az_text.return_value = json.dumps({"value": [group]})
         result = await find_board_group()
         assert result == "group-abc-123"
+
+    async def test_finds_custom_group_name(self) -> None:
+        group = {"displayName": "My Custom Group", "id": "custom-group-id"}
+        self._az_text.return_value = json.dumps({"value": [group]})
+        result = await find_board_group("My Custom Group")
+        assert result == "custom-group-id"
 
     async def test_returns_none_when_not_found(self) -> None:
         self._az_text.return_value = json.dumps({"value": []})
@@ -188,6 +194,19 @@ class TestEnsureBoardGroup:
         group_id, msg = await ensure_board_group()
         assert group_id is None
         assert "could not create" in msg.lower()
+
+    async def test_passes_custom_group_name(self) -> None:
+        self._az_text.return_value = json.dumps({"id": "custom-id"})
+        group_id, msg = await ensure_board_group("Corp VM Team")
+        assert group_id == "custom-id"
+        assert "Corp VM Team" in msg
+        # Verify the POST body uses the custom name.
+        call_args = self._az_text.call_args
+        args = call_args[0]
+        body_idx = args.index("--body") + 1
+        body = json.loads(args[body_idx])
+        assert body["displayName"] == "Corp VM Team"
+        assert body["mailNickname"] == "CorpVMTeam"
 
 
 class TestCreateMfaPolicy:

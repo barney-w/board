@@ -12,9 +12,6 @@ from board.core import config as cfg
 from board.core.errors import SSHError
 from board.ui import console as con
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
-
 
 async def _collect_metrics(
     dev_name: str,
@@ -70,11 +67,12 @@ async def _collect_metrics(
     return metrics
 
 
-async def _run_fleet(env: str, region_short: str) -> None:
+async def _run_fleet(rg_arg: str) -> None:
     """Collect fleet status and display dashboard."""
-    environment = env or os.environ.get("BOARD_ENVIRONMENT", "personal")
-    region = region_short or DEFAULT_REGION
-    rg = cfg.resource_group(environment, region)
+    rg = rg_arg or os.environ.get("BOARD_RG", "")
+    if not rg:
+        con.error("Resource group is required. Pass --rg or set BOARD_RG.")
+        raise typer.Exit(1)
 
     con.header("Fleet Status")
 
@@ -91,12 +89,15 @@ async def _run_fleet(env: str, region_short: str) -> None:
         con.info(f"No boards found in {rg}")
         return
 
+    # All VMs in this RG share the same Azure location.
+    location = vms[0]["location"] or "australiaeast"
+
     # Collect metrics from running VMs concurrently
     tasks = []
     for vm in vms:
         dev_name = vm["name"].rsplit("-", 1)[-1] if "-" in vm["name"] else vm["name"]
         if vm["power_state"] == "running":
-            fqdn = cfg.hostname(dev_name, DEFAULT_LOCATION)
+            fqdn = cfg.hostname(dev_name, location)
             key_path = cfg.ssh_key_path_expanded(dev_name)
             if key_path.exists():
                 tasks.append(_collect_metrics(dev_name, fqdn, str(key_path)))
@@ -195,8 +196,7 @@ async def _run_fleet(env: str, region_short: str) -> None:
 
 
 def fleet_command(
-    env: str = typer.Option("", "--env", help="Environment name."),
-    region_short: str = typer.Option("", "--region-short", help="Short region code (e.g. aue)."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
 ) -> None:
     """Show fleet dashboard with status and metrics for all boards."""
-    asyncio.run(_run_fleet(env, region_short))
+    asyncio.run(_run_fleet(rg))

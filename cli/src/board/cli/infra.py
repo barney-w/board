@@ -1,8 +1,12 @@
-"""board infrastructure commands — create-rg, create-vm, validate, what-if, destroy, preflight."""
+"""board infrastructure commands — create-vm, validate, what-if, destroy, preflight.
+
+These are the lower-level "expert" entry points; most users want ``board up``.
+All commands operate on a pre-existing resource group passed via ``--rg`` (or
+``BOARD_RG``). Board never creates resource groups.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import os
 import subprocess
 from datetime import UTC, datetime
@@ -12,54 +16,42 @@ import typer
 from board.core import config as cfg
 from board.ui import console as con
 
-DEFAULT_LOCATION = "australiaeast"
-DEFAULT_REGION = "aue"
+
+def _resolve_rg(rg_arg: str = "") -> str:
+    rg = rg_arg or os.environ.get("BOARD_RG", "")
+    if not rg:
+        con.error("Resource group is required. Pass --rg or set BOARD_RG.")
+        raise typer.Exit(1)
+    return rg
 
 
-def _resolve_env(env: str = "") -> str:
-    return env or os.environ.get("BOARD_ENVIRONMENT", "personal")
-
-
-def create_rg_command(
-    env: str = typer.Option("", "--env", help="Environment name."),
-    location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
-) -> None:
-    """Create the resource group (idempotent)."""
-
-    async def _run() -> None:
-        environment = _resolve_env(env)
-        rg = cfg.resource_group(environment, region_short)
-
-        from board.azure.auth import get_credential, get_subscription_id
-        from board.azure.deployment import ensure_resource_group
-
-        credential = get_credential()
-        sub_id = await get_subscription_id()
-
-        with con.spin(f"Creating resource group {rg}..."):
-            await ensure_resource_group(
-                credential,
-                sub_id,
-                rg,
-                location,
-                tags={"project": "devvm", "environment": environment, "managed-by": "bicep"},
-            )
-        con.success(f"Resource group {rg} ready")
-
-    asyncio.run(_run())
+def _rg_location(rg: str) -> str:
+    """Look up the resource group's location."""
+    result = subprocess.run(  # noqa: S603, S607
+        ["az", "group", "show", "--name", rg, "--query", "location", "-o", "tsv"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        con.error(f"Could not resolve location for resource group '{rg}'.")
+        raise typer.Exit(1)
+    return result.stdout.strip()
 
 
 def create_vm_command(
     name: str = typer.Argument(..., help="Developer name (e.g. jbloggs)."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     sku: str = typer.Option("Standard_D2s_v6", "--sku", help="VM SKU."),
-    location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
+    preset: str = typer.Option(
+        "",
+        "--preset",
+        help="Path to a .bicepparam preset file with extra defaults.",
+    ),
 ) -> None:
     """Deploy a VM directly via Bicep (no wizard)."""
-    environment = _resolve_env(env)
-    rg = cfg.resource_group(environment, region_short)
+    rg_name = _resolve_rg(rg)
+    location = _rg_location(rg_name)
 
     # Resolve SSH public key
     key_path = cfg.ssh_key_path_expanded(name)
@@ -75,15 +67,9 @@ def create_vm_command(
     fqdn = cfg.hostname(name, location)
     subprocess.run(["ssh-keygen", "-R", fqdn], capture_output=True, check=False)  # noqa: S603, S607
 
-    # Find Bicep template and params
+    # Find Bicep template
     infra_dir = cfg._find_infra_dir()
     bicep_file = infra_dir / "main.bicep"
-    bicep_params = cfg.discover_bicepparams(infra_dir)
-    param_file = None
-    for pname, ppath in bicep_params:
-        if pname == environment:
-            param_file = ppath
-            break
 
     ts = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
     cmd = [
@@ -92,7 +78,7 @@ def create_vm_command(
         "group",
         "create",
         "--resource-group",
-        rg,
+        rg_name,
         "--template-file",
         str(bicep_file),
         "--parameters",
@@ -103,33 +89,24 @@ def create_vm_command(
         f"deploy-{name}-{ts}",
         "--verbose",
     ]
-    if param_file:
-        cmd.insert(cmd.index("--parameters"), "--parameters")
-        cmd.insert(cmd.index("--parameters") + 1, str(param_file))
+    if preset:
+        cmd.extend(["--parameters", preset])
 
-    con.info(f"Deploying board for {name} in {environment}...")
+    con.info(f"Deploying board for {name} into {rg_name}...")
     result = subprocess.run(cmd, check=False)  # noqa: S603
     if result.returncode != 0:
         con.error("Deployment failed.")
         raise typer.Exit(1)
-    con.success(f"Board deployed. Run: board vm ssh {name}")
+    con.success(f"Board deployed. Run: board vm ssh {name} --rg {rg_name}")
 
 
 def validate_command(
-    env: str = typer.Option("", "--env", help="Environment name."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
+    preset: str = typer.Option("", "--preset", help="Path to a .bicepparam preset file."),
 ) -> None:
     """Validate Bicep templates without deploying."""
-    environment = _resolve_env(env)
-    rg = cfg.resource_group(environment, region_short)
+    rg_name = _resolve_rg(rg)
     infra_dir = cfg._find_infra_dir()
-
-    params = cfg.discover_bicepparams(infra_dir)
-    param_file = None
-    for pname, ppath in params:
-        if pname == environment:
-            param_file = ppath
-            break
 
     cmd = [
         "az",
@@ -137,12 +114,12 @@ def validate_command(
         "group",
         "validate",
         "--resource-group",
-        rg,
+        rg_name,
         "--template-file",
         str(infra_dir / "main.bicep"),
     ]
-    if param_file:
-        cmd.extend(["--parameters", str(param_file)])
+    if preset:
+        cmd.extend(["--parameters", preset])
 
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
     if result.returncode == 0:
@@ -156,20 +133,12 @@ def validate_command(
 
 def what_if_command(
     name: str = typer.Argument(..., help="Developer name."),
-    env: str = typer.Option("", "--env", help="Environment name."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
+    preset: str = typer.Option("", "--preset", help="Path to a .bicepparam preset file."),
 ) -> None:
     """Preview deployment changes (az deployment what-if)."""
-    environment = _resolve_env(env)
-    rg = cfg.resource_group(environment, region_short)
+    rg_name = _resolve_rg(rg)
     infra_dir = cfg._find_infra_dir()
-
-    params = cfg.discover_bicepparams(infra_dir)
-    param_file = None
-    for pname, ppath in params:
-        if pname == environment:
-            param_file = ppath
-            break
 
     cmd = [
         "az",
@@ -177,48 +146,47 @@ def what_if_command(
         "group",
         "what-if",
         "--resource-group",
-        rg,
+        rg_name,
         "--template-file",
         str(infra_dir / "main.bicep"),
         "--parameters",
         f"developerName={name}",
     ]
-    if param_file:
-        cmd.extend(["--parameters", str(param_file)])
+    if preset:
+        cmd.extend(["--parameters", preset])
 
     subprocess.run(cmd, check=False)  # noqa: S603
 
 
 def destroy_command(
-    env: str = typer.Option("", "--env", help="Environment name."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete entire environment (resource group + purge Key Vaults)."""
-    environment = _resolve_env(env)
-    rg = cfg.resource_group(environment, region_short)
+    """Delete every board-managed resource inside the RG (NOT the RG itself)."""
+    rg_name = _resolve_rg(rg)
 
     if not yes:
-        con.warn(f"This will delete the ENTIRE resource group {rg}.")
+        con.warn(f"This will delete every board resource inside {rg_name}.")
+        con.warn("The resource group itself will NOT be deleted.")
         typed = con.console.input("[bold]Type the resource group name to confirm: [/bold]")
-        if typed.strip() != rg:
+        if typed.strip() != rg_name:
             con.info("Cancelled.")
             return
 
     # Check if RG exists
     result = subprocess.run(  # noqa: S603, S607
-        ["az", "group", "show", "--name", rg],
+        ["az", "group", "show", "--name", rg_name],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        con.info(f"Resource group {rg} does not exist.")
-        _purge_orphaned_vaults(rg)
+        con.info(f"Resource group {rg_name} does not exist.")
+        _purge_orphaned_vaults(rg_name)
         return
 
-    # Discover Key Vaults before deleting
+    # Discover Key Vaults inside the RG before deleting (to purge soft-deleted ones after).
     kv_result = subprocess.run(  # noqa: S603, S607
-        ["az", "keyvault", "list", "--resource-group", rg, "--query", "[].name", "-o", "tsv"],
+        ["az", "keyvault", "list", "--resource-group", rg_name, "--query", "[].name", "-o", "tsv"],
         capture_output=True,
         text=True,
     )
@@ -226,20 +194,37 @@ def destroy_command(
         [v for v in kv_result.stdout.strip().split("\n") if v] if kv_result.stdout.strip() else []
     )
 
-    con.info(f"Deleting resource group {rg}...")
-    delete_result = subprocess.run(  # noqa: S603, S607
-        ["az", "group", "delete", "--name", rg, "--yes"],
+    # Delete only board-tagged resources to avoid wiping out unrelated resources
+    # that happen to share the RG.
+    con.info(f"Deleting board-managed resources in {rg_name}...")
+    list_cmd = subprocess.run(  # noqa: S603, S607
+        [
+            "az",
+            "resource",
+            "list",
+            "--resource-group",
+            rg_name,
+            "--query",
+            "[?tags.\"managed-by\"=='bicep' || tags.\"managed-by\"=='board-cli'].id",
+            "-o",
+            "tsv",
+        ],
+        capture_output=True,
+        text=True,
         check=False,
     )
-    if delete_result.returncode in (130, 2):
-        con.info("Wait cancelled -- deletion still running server-side on Azure.")
-        con.info(f"Check: az group show --name {rg} --query properties.provisioningState -o tsv")
-        return
-    elif delete_result.returncode != 0:
-        con.error(f"Resource group deletion failed (exit {delete_result.returncode}).")
-        raise typer.Exit(1)
-
-    con.success(f"Resource group {rg} deleted")
+    resource_ids = [r for r in list_cmd.stdout.strip().split("\n") if r]
+    if not resource_ids:
+        con.info("No board-managed resources found.")
+    else:
+        delete_result = subprocess.run(  # noqa: S603, S607
+            ["az", "resource", "delete", "--ids", *resource_ids],
+            check=False,
+        )
+        if delete_result.returncode != 0:
+            con.error(f"Resource deletion failed (exit {delete_result.returncode}).")
+            raise typer.Exit(1)
+        con.success(f"Deleted {len(resource_ids)} board-managed resources")
 
     for kv in kv_names:
         con.info(f"Purging soft-deleted Key Vault: {kv}")
@@ -280,15 +265,12 @@ def _purge_orphaned_vaults(rg: str) -> None:
 
 def preflight_command(
     name: str = typer.Argument(..., help="Developer name."),
-    env: str = typer.Option("", "--env", help="Environment name."),
+    rg: str = typer.Option("", "--rg", help="Resource group (or set BOARD_RG)."),
     sku: str = typer.Option("Standard_D2s_v6", "--sku", help="VM SKU."),
-    location: str = typer.Option(DEFAULT_LOCATION, "--location", help="Azure region."),
-    region_short: str = typer.Option(DEFAULT_REGION, "--region-short", help="Short region code."),
 ) -> None:
     """Pre-deployment validation checks."""
-    environment = _resolve_env(env)
-    rg = cfg.resource_group(environment, region_short)
-    vm_full = cfg.vm_name(environment, region_short, name)
+    rg_name = _resolve_rg(rg)
+    vm_full = cfg.vm_name(rg_name, name)
 
     passed = 0
     failed = 0
@@ -331,13 +313,13 @@ def preflight_command(
     # 3. Resource group
     if (
         subprocess.run(  # noqa: S603, S607
-            ["az", "group", "show", "--name", rg], capture_output=True
+            ["az", "group", "show", "--name", rg_name], capture_output=True
         ).returncode
         == 0
     ):
-        ok(f"Resource group {rg} exists")
+        ok(f"Resource group {rg_name} exists")
     else:
-        fail(f"Resource group {rg} not found", f"board create-rg --env {environment}")
+        fail(f"Resource group {rg_name} not found", f"Ask an admin to create '{rg_name}'")
 
     # 4. SSH key
     key_path = cfg.ssh_key_path_expanded(name)
@@ -358,7 +340,7 @@ def preflight_command(
     # 6. No existing VM
     if (
         subprocess.run(  # noqa: S603, S607
-            ["az", "vm", "show", "--resource-group", rg, "--name", vm_full],
+            ["az", "vm", "show", "--resource-group", rg_name, "--name", vm_full],
             capture_output=True,
         ).returncode
         != 0
@@ -372,4 +354,4 @@ def preflight_command(
     if failed > 0:
         con.error("Fix the issues above before deploying.")
         raise typer.Exit(1)
-    con.info(f"Ready: board create-vm {name} --env {environment} --sku {sku} --location {location}")
+    con.info(f"Ready: board create-vm {name} --rg {rg_name} --sku {sku}")

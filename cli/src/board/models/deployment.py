@@ -11,13 +11,22 @@ from typing import Literal
 class DeploymentConfig:
     """Configuration for a board deployment.
 
+    The resource group is the source of truth — it must already exist in Azure
+    and the caller must have Contributor or Owner on it. The location comes
+    from the RG itself. VM and per-developer resource names are derived from
+    the RG name with the leading ``rg-`` stripped.
+
     Derived properties MUST produce strings identical to extension/src/config.ts.
     """
 
     developer_name: str
-    environment: str
-    region: str
-    region_short: str
+    resource_group: str
+    location: str
+
+    @property
+    def rg_suffix(self) -> str:
+        """RG name with leading 'rg-' stripped, used as a naming prefix."""
+        return self.resource_group.removeprefix("rg-")
 
     @property
     def ssh_host_alias(self) -> str:
@@ -26,18 +35,13 @@ class DeploymentConfig:
 
     @property
     def hostname(self) -> str:
-        """devvm-{name}.{region}.cloudapp.azure.com"""
-        return f"devvm-{self.developer_name}.{self.region}.cloudapp.azure.com"
-
-    @property
-    def resource_group(self) -> str:
-        """rg-{env}-{regionShort}-devvm"""
-        return f"rg-{self.environment}-{self.region_short}-devvm"
+        """devvm-{name}.{location}.cloudapp.azure.com"""
+        return f"devvm-{self.developer_name}.{self.location}.cloudapp.azure.com"
 
     @property
     def vm_name(self) -> str:
-        """vm-{env}-{regionShort}-devvm-{name}"""
-        return f"vm-{self.environment}-{self.region_short}-devvm-{self.developer_name}"
+        """vm-{rg-suffix}-{name}"""
+        return f"vm-{self.rg_suffix}-{self.developer_name}"
 
     @property
     def ssh_key_path(self) -> str:

@@ -7,6 +7,7 @@ from ruamel.yaml import YAML
 from board.models.bundle import BundleEnvelope, BundlePayload
 from board.models.deployment import DeploymentConfig, PhaseResult
 from board.models.manifest import ProjectManifest
+from board.models.policies import PoliciesConfig
 
 
 class TestProjectManifest:
@@ -65,6 +66,26 @@ class TestProjectManifest:
         m = ProjectManifest(name="test-proj")
         assert m.project_path == "~/projects/test-proj"
 
+    def test_repo_object_auth(self) -> None:
+        manifest = ProjectManifest(
+            name="private",
+            repo={
+                "url": "https://github.com/example/private.git",
+                "ref": "feat/private",
+                "auth": {
+                    "type": "github-token",
+                    "keyvault_secret": "github-private-bootstrap-token",
+                    "persist": False,
+                },
+            },
+        )
+
+        assert manifest.repo_url == "https://github.com/example/private.git"
+        assert manifest.repo_ref == "feat/private"
+        assert manifest.repo_auth is not None
+        assert manifest.repo_auth.keyvault_secret == "github-private-bootstrap-token"
+        assert manifest.repo_auth.persist is False
+
     def test_project_path_explicit(self) -> None:
         m = ProjectManifest(name="test-proj", path="~/custom/path")
         assert m.project_path == "~/custom/path"
@@ -87,9 +108,7 @@ class TestBundlePayload:
 
     EXPECTED_CAMEL_FIELDS = {
         "developerName",
-        "environment",
         "region",
-        "regionShort",
         "hostname",
         "username",
         "authMethod",
@@ -105,15 +124,13 @@ class TestBundlePayload:
     def test_camel_case_serialisation(self) -> None:
         payload = BundlePayload(
             developer_name="jbloggs",
-            environment="personal",
             region="australiaeast",
-            region_short="aue",
             hostname="devvm-jbloggs.australiaeast.cloudapp.azure.com",
             username="devuser",
             ssh_private_key="-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
             ssh_public_key="ssh-ed25519 AAAA test",
-            resource_group="rg-personal-aue-devvm",
-            vm_name="vm-personal-aue-devvm-jbloggs",
+            resource_group="rg-platform-prod",
+            vm_name="vm-platform-prod-jbloggs",
         )
         dumped = payload.model_dump(by_alias=True, exclude_none=True)
         assert set(dumped.keys()) == self.EXPECTED_CAMEL_FIELDS - {
@@ -125,9 +142,7 @@ class TestBundlePayload:
     def test_all_fields_present(self) -> None:
         payload = BundlePayload(
             developer_name="jbloggs",
-            environment="personal",
             region="australiaeast",
-            region_short="aue",
             hostname="devvm-jbloggs.australiaeast.cloudapp.azure.com",
             username="devuser",
             ssh_private_key="key",
@@ -146,9 +161,7 @@ class TestBundlePayload:
         """Verify all camelCase field names match the TypeScript interface."""
         payload = BundlePayload(
             developer_name="x",
-            environment="e",
             region="r",
-            region_short="rs",
             hostname="h",
             username="u",
             ssh_private_key="k",
@@ -162,9 +175,7 @@ class TestBundlePayload:
         # These are the exact field names from extension/src/bundle.ts
         for field_name in [
             "developerName",
-            "environment",
             "region",
-            "regionShort",
             "hostname",
             "username",
             "authMethod",
@@ -186,20 +197,56 @@ class TestBundleEnvelope:
 
 
 class TestDeploymentConfig:
-    def test_all_derivations(self) -> None:
+    def test_all_derivations_with_rg_prefix(self) -> None:
         cfg = DeploymentConfig(
             developer_name="jbloggs",
-            environment="personal",
-            region="australiaeast",
-            region_short="aue",
+            resource_group="rg-platform-prod",
+            location="australiaeast",
         )
+        assert cfg.rg_suffix == "platform-prod"
         assert cfg.ssh_host_alias == "devvm-jbloggs"
         assert cfg.hostname == "devvm-jbloggs.australiaeast.cloudapp.azure.com"
-        assert cfg.resource_group == "rg-personal-aue-devvm"
-        assert cfg.vm_name == "vm-personal-aue-devvm-jbloggs"
+        assert cfg.vm_name == "vm-platform-prod-jbloggs"
         assert cfg.ssh_key_path == "~/.ssh/devvm-jbloggs"
         assert cfg.tunnel_url() == "https://vscode.dev/tunnel/devvm-jbloggs"
         assert cfg.tunnel_url("https://custom") == "https://custom"
+
+    def test_rg_without_rg_prefix(self) -> None:
+        """If the RG name doesn't start with 'rg-', use it as-is."""
+        cfg = DeploymentConfig(
+            developer_name="jbloggs",
+            resource_group="my-team",
+            location="australiaeast",
+        )
+        assert cfg.rg_suffix == "my-team"
+        assert cfg.vm_name == "vm-my-team-jbloggs"
+
+    def test_legacy_rg_naming_still_works(self) -> None:
+        """The old rg-{env}-{regionShort}-devvm pattern still derives sanely."""
+        cfg = DeploymentConfig(
+            developer_name="aivm",
+            resource_group="rg-dev-aue-devvm",
+            location="australiaeast",
+        )
+        assert cfg.vm_name == "vm-dev-aue-devvm-aivm"
+
+
+class TestPoliciesConfig:
+    def test_security_group_name_default(self) -> None:
+        p = PoliciesConfig()
+        assert p.security_group_name == "Board VM Users"
+
+    def test_security_group_name_custom(self) -> None:
+        p = PoliciesConfig(security_group_name="Corp Dev Team")
+        assert p.security_group_name == "Corp Dev Team"
+
+    def test_security_group_name_from_yaml(self, tmp_path: Path) -> None:
+        yaml_file = tmp_path / "board.policies.yaml"
+        yaml_file.write_text("require_entra_auth: true\nsecurity_group_name: My Team VMs\n")
+        yaml = YAML()
+        data = yaml.load(yaml_file)
+        p = PoliciesConfig(**data)
+        assert p.security_group_name == "My Team VMs"
 
 
 class TestPhaseResult:

@@ -4,7 +4,7 @@ import pytest
 
 from board.core.config import (
     hostname,
-    resource_group,
+    rg_suffix,
     ssh_host_alias,
     ssh_key_path,
     tunnel_url,
@@ -24,11 +24,18 @@ class TestNamingConventions:
             hostname("jbloggs", "australiaeast") == "devvm-jbloggs.australiaeast.cloudapp.azure.com"
         )
 
-    def test_resource_group(self) -> None:
-        assert resource_group("personal", "aue") == "rg-personal-aue-devvm"
+    def test_rg_suffix_strips_rg_prefix(self) -> None:
+        assert rg_suffix("rg-platform-prod") == "platform-prod"
+        assert rg_suffix("rg-dev-aue-devvm") == "dev-aue-devvm"
+
+    def test_rg_suffix_passthrough(self) -> None:
+        """If the RG name doesn't start with 'rg-', use it as-is."""
+        assert rg_suffix("my-team") == "my-team"
+        assert rg_suffix("platform_prod") == "platform_prod"
 
     def test_vm_name(self) -> None:
-        assert vm_name("personal", "aue", "jbloggs") == "vm-personal-aue-devvm-jbloggs"
+        assert vm_name("rg-platform-prod", "jbloggs") == "vm-platform-prod-jbloggs"
+        assert vm_name("my-team", "jbloggs") == "vm-my-team-jbloggs"
 
     def test_ssh_key_path(self) -> None:
         assert ssh_key_path("jbloggs") == "~/.ssh/devvm-jbloggs"
@@ -42,20 +49,19 @@ class TestNamingConventions:
     def test_tunnel_url_empty_name(self) -> None:
         assert tunnel_url("") == ""
 
-    # Multiple input sets for comprehensive coverage
     @pytest.mark.parametrize(
-        "name,env,region,rshort",
+        "name,rg,region",
         [
-            ("jbloggs", "personal", "australiaeast", "aue"),
-            ("asmith", "sandbox", "eastus", "eus"),
-            ("cjones", "personal", "westeurope", "weu"),
+            ("jbloggs", "rg-personal-aue-devvm", "australiaeast"),
+            ("asmith", "rg-sandbox-eus-devvm", "eastus"),
+            ("cjones", "platform-prod", "westeurope"),
         ],
     )
-    def test_all_derivations(self, name: str, env: str, region: str, rshort: str) -> None:
+    def test_all_derivations(self, name: str, rg: str, region: str) -> None:
+        suffix = rg.removeprefix("rg-")
         assert ssh_host_alias(name) == f"devvm-{name}"
         assert hostname(name, region) == f"devvm-{name}.{region}.cloudapp.azure.com"
-        assert resource_group(env, rshort) == f"rg-{env}-{rshort}-devvm"
-        assert vm_name(env, rshort, name) == f"vm-{env}-{rshort}-devvm-{name}"
+        assert vm_name(rg, name) == f"vm-{suffix}-{name}"
         assert ssh_key_path(name) == f"~/.ssh/devvm-{name}"
 
 
