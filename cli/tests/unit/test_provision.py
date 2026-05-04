@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from board.models.manifest import (
+    DevConfig,
     DockerConfig,
     DockerContainer,
     EnvConfig,
@@ -196,6 +197,62 @@ class TestPhaseClone:
         assert len(engine.errors) > 0
 
     @pytest.mark.asyncio
+    async def test_clone_private_repo_with_env_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ATLAS_GITHUB_TOKEN", "test-token")
+        ssh = FakeSSHSession()
+        ssh.responses["test -d"] = FakeSSHResult(exit_status=1)
+        ssh.responses["git clone"] = FakeSSHResult(exit_status=0)
+
+        manifest = ProjectManifest(
+            name="atlas",
+            repo={
+                "url": "https://github.com/example/atlas.git",
+                "ref": "feat/atlas",
+                "auth": {"type": "github-token", "env_var": "ATLAS_GITHUB_TOKEN"},
+            },
+        )
+
+        engine = ProvisionEngine(ssh=ssh, manifest=manifest)
+        result = await engine.phase_clone()
+
+        assert result.success
+        assert any("GIT_ASKPASS" in cmd for cmd in ssh.commands)
+        assert any("export TOKEN" in cmd for cmd in ssh.commands)
+        assert any("--branch feat/atlas" in cmd for cmd in ssh.commands)
+        assert any(
+            "remote set-url origin https://github.com/example/atlas.git" in cmd
+            for cmd in ssh.commands
+        )
+
+    @pytest.mark.asyncio
+    async def test_clone_private_repo_prefers_env_token_over_keyvault(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ATLAS_GITHUB_TOKEN", "test-token")
+        ssh = FakeSSHSession()
+        ssh.responses["test -d"] = FakeSSHResult(exit_status=1)
+        ssh.responses["git clone"] = FakeSSHResult(exit_status=0)
+
+        manifest = ProjectManifest(
+            name="atlas",
+            repo={
+                "url": "https://github.com/example/atlas.git",
+                "auth": {
+                    "type": "github-token",
+                    "env_var": "ATLAS_GITHUB_TOKEN",
+                    "keyvault_secret": "github-atlas-bootstrap-token",
+                },
+            },
+        )
+
+        engine = ProvisionEngine(ssh=ssh, manifest=manifest)
+        result = await engine.phase_clone()
+
+        assert result.success
+        assert not engine.errors
+        assert not any("az keyvault secret show" in cmd for cmd in ssh.commands)
+
+    @pytest.mark.asyncio
     async def test_ttfc_hook_installed(self) -> None:
         ssh = FakeSSHSession()
         ssh.responses["test -d"] = FakeSSHResult(exit_status=0)
@@ -222,6 +279,26 @@ class TestPhaseEnv:
         assert result.success
         # Verify env script was created and run
         assert any("env-surf.sh" in cmd for cmd in ssh.commands)
+
+    @pytest.mark.asyncio
+    async def test_env_hardcoded_without_keyvault(self) -> None:
+        ssh = FakeSSHSession()
+        manifest = ProjectManifest(
+            name="atlas",
+            path="~/projects/atlas",
+            env=EnvConfig(
+                file="web/.env.local",
+                hardcoded={"VITE_FOUNDRY_AGENT_NAME": "atlas-personal"},
+                required=["VITE_FOUNDRY_AGENT_NAME"],
+            ),
+        )
+
+        engine = ProvisionEngine(ssh=ssh, manifest=manifest)
+        result = await engine.phase_env()
+
+        assert result.success
+        assert any("env-atlas.sh" in cmd for cmd in ssh.commands)
+        assert any("VITE_FOUNDRY_AGENT_NAME=atlas-personal" in cmd for cmd in ssh.commands)
 
     @pytest.mark.asyncio
     async def test_env_fallback(self) -> None:
@@ -328,6 +405,28 @@ class TestPhaseHealth:
         # Health failures are warnings, not errors — phase still succeeds
         assert result.success
         assert len(engine.warnings) > 0
+
+    @pytest.mark.asyncio
+    async def test_dev_mode_skips_check_for_unstarted_service(self) -> None:
+        # In dev mode, services aren't auto-started — health checks bound to
+        # those service ports should be skipped, not warned about.
+        manifest = _make_surf_manifest()
+        manifest.dev = DevConfig(run="just dev")
+        manifest.health = [
+            HealthCheck(label="Postgres", check="pg_isready"),
+            HealthCheck(label="Surf API", check="curl -sf http://localhost:8090", port=8090),
+        ]
+
+        ssh = FakeSSHSession()
+        ssh.responses["pg_isready"] = FakeSSHResult(exit_status=0)
+        # Surf API check would fail if executed — but it shouldn't be executed.
+        ssh.responses["curl"] = FakeSSHResult(exit_status=1)
+
+        engine = ProvisionEngine(ssh=ssh, manifest=manifest)
+        result = await engine.phase_health()
+        assert result.success
+        assert not any("Surf API" in w for w in engine.warnings)
+        assert not any("curl" in c for c in ssh.commands)
 
 
 class TestWarningAccumulation:
