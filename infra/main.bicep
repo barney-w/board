@@ -84,12 +84,6 @@ param entraLoginPrincipalType string = 'User'
 @description('Resource ID of Key Vault for project secrets (empty = skip)')
 param keyVaultResourceId string = ''
 
-@description('Subnet CIDR range')
-param subnetAddressPrefix string = '10.0.1.0/24'
-
-@description('VNet CIDR range')
-param vnetAddressPrefix string = '10.0.0.0/16'
-
 @description('Deployment timestamp (auto-generated, do not set manually)')
 param deploymentTimestamp string = utcNow('yyyy-MM-dd')
 
@@ -167,34 +161,24 @@ var httpsRule = enableDirectHttps ? [
 // ── Module 1: NSG ──
 
 module nsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
-  name: 'nsg-deployment'
+  name: 'nsg-${developerName}-deployment'
   params: {
-    name: 'nsg-${prefix}'
+    name: 'nsg-${prefix}-${developerName}'
     location: location
     tags: commonTags
     securityRules: concat(baseSecurityRules, httpsRule)
   }
 }
 
-// ── Module 2: VNet + Subnet ──
+// ── Shared network (created out-of-band by the CLI's ensure_network helper) ──
 
-module vnet 'br/public:avm/res/network/virtual-network:0.7.2' = {
-  name: 'vnet-deployment'
-  params: {
-    name: 'vnet-${prefix}'
-    location: location
-    tags: commonTags
-    addressPrefixes: [
-      vnetAddressPrefix
-    ]
-    subnets: [
-      {
-        name: 'snet-${prefix}'
-        addressPrefix: subnetAddressPrefix
-        networkSecurityGroupResourceId: nsg.outputs.resourceId
-      }
-    ]
-  }
+resource existingVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
+  name: 'vnet-${prefix}'
+}
+
+resource existingSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: existingVnet
+  name: 'snet-${prefix}'
 }
 
 // ── Module 3: Public IP (conditional) ──
@@ -260,10 +244,11 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.0' = {
       {
         name: 'nic-${prefix}-${developerName}'
         tags: commonTags
+        networkSecurityGroupResourceId: nsg.outputs.resourceId
         ipConfigurations: [
           {
             name: 'ipconfig01'
-            subnetResourceId: vnet.outputs.subnetResourceIds[0]
+            subnetResourceId: existingSubnet.id
             pipConfiguration: enablePublicIp ? {
               publicIPAddressResourceId: publicIp!.outputs.resourceId
             } : null

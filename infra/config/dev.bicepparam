@@ -27,8 +27,6 @@ param osDiskSku = 'StandardSSD_LRS'
 
 param allowedSshSourceIP = '*'  // override per dev; CIDR strongly preferred
 param enablePublicIp = true
-param vnetAddressPrefix = '10.10.0.0/16'
-param subnetAddressPrefix = '10.10.1.0/24'
 
 // ── Schedules ──
 
