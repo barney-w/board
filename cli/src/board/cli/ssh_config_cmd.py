@@ -8,8 +8,10 @@ from pathlib import Path
 
 import typer
 
+from board.azure.vm_tags import resolve_auth_method
 from board.cli import ssh_config_app
 from board.core import config as cfg
+from board.core.errors import BoardError
 from board.ssh.config_file import (
     build_entra_id_config_block,
     build_ssh_key_config_block,
@@ -41,30 +43,6 @@ def _rg_location(rg: str) -> str:
     return result.stdout.strip()
 
 
-def _resolve_auth_method(rg: str, vm: str) -> str:
-    """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
-    result = subprocess.run(  # noqa: S603, S607
-        [
-            "az",
-            "vm",
-            "show",
-            "--resource-group",
-            rg,
-            "--name",
-            vm,
-            "--query",
-            'tags."auth-method"',
-            "-o",
-            "tsv",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    tag = result.stdout.strip()
-    return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
-
-
 def _build_block(name: str, rg: str, location: str, auth: str) -> str:
     """Build the appropriate SSH config block based on auth method."""
     alias = cfg.ssh_host_alias(name)
@@ -72,7 +50,11 @@ def _build_block(name: str, rg: str, location: str, auth: str) -> str:
 
     if auth == "auto":
         vm = cfg.vm_name(rg, name)
-        auth = _resolve_auth_method(rg, vm)
+        try:
+            auth = resolve_auth_method(rg, vm)
+        except BoardError as exc:
+            con.error(str(exc))
+            raise typer.Exit(1) from exc
         con.info(f"Auth method: {auth} (from VM tag)")
 
     if auth == "entra-id":

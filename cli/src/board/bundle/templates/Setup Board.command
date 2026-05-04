@@ -57,9 +57,13 @@ elif command -v python &>/dev/null; then
     AUTH_METHOD="$(python -c "import json,sys; d=json.load(open('$PASS')); print(d.get('authMethod','ssh-key'))" 2>/dev/null || echo "ssh-key")"
 fi
 
-# Open the board pass in VS Code (triggers the import flow)
+# Open the board pass in a NEW VS Code window. A new window starts a fresh
+# extension host that loads the freshly installed extension. Without
+# --new-window, any already-open VS Code keeps the previous extension code in
+# memory and the import flow can hit the old (encrypted-only) code path —
+# producing a passphrase prompt for what should be a plaintext Entra ID pass.
 echo "  Opening your board pass in VS Code..."
-code "$PASS"
+code --new-window "$PASS"
 echo ""
 echo "  VS Code is now importing your board pass."
 if [[ "$AUTH_METHOD" == "entra-id" ]]; then

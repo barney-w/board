@@ -181,11 +181,17 @@ export async function removeSshConfig(hostAlias: string): Promise<void> {
  */
 /**
  * Result of refreshing Entra ID certificates.
- * Includes the Entra user (UPN) extracted from the generated SSH config.
+ * Includes the Entra user (UPN) extracted from the generated SSH config and,
+ * on failure, the actual ``az`` stderr/stdout and resolved ``az`` path so the
+ * caller can show an actionable error.
  */
 export interface EntraCertResult {
   success: boolean;
   entraUser?: string;
+  errorMessage?: string;
+  azPath?: string;
+  stderr?: string;
+  stdout?: string;
 }
 
 /** Resolve the full path to `az` CLI, checking common install locations */
@@ -258,7 +264,14 @@ export async function refreshEntraCerts(config: BoardConfig): Promise<EntraCertR
     return { success: true, entraUser };
   } catch (err) {
     console.error('[Board] az ssh config failed:', err);
-    return { success: false };
+    const e = err as { message?: string; stderr?: string; stdout?: string };
+    return {
+      success: false,
+      errorMessage: e.message,
+      stderr: e.stderr,
+      stdout: e.stdout,
+      azPath,
+    };
   }
 }
 

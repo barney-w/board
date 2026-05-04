@@ -74,6 +74,7 @@ tests/integration/test-key.pub
 # Internal planning & launch docs
 docs/launch/
 docs/plans/
+/plans/
 
 # Personal workspace config
 myterm.toml

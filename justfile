@@ -6,10 +6,9 @@ set dotenv-load := true
 _board := "uv run --project cli board"
 
 # Defaults (overridable via env or CLI)
-default_env := "personal"
+default_rg := env_var_or_default("BOARD_RG", "")
 default_sku := "Standard_D2s_v6"
 default_location := "australiaeast"
-default_region := "aue"
 
 # ── Interactive Setup ──
 
@@ -28,80 +27,76 @@ admin:
 # ── Deployment ──
 
 # Deploy a new board (direct Bicep deploy, no wizard)
-create-vm name env=default_env sku=default_sku:
-    @{{_board}} create-vm {{name}} --env {{env}} --sku {{sku}} --location {{default_location}} --region-short {{default_region}}
-
-# Create the resource group (run once per environment)
-create-rg env=default_env:
-    @{{_board}} create-rg --env {{env}} --location {{default_location}} --region-short {{default_region}}
+create-vm name rg=default_rg sku=default_sku:
+    @{{_board}} create-vm {{name}} --rg "{{rg}}" --sku {{sku}}
 
 # Validate Bicep without deploying
-validate env=default_env:
-    @{{_board}} validate --env {{env}} --region-short {{default_region}}
+validate rg=default_rg:
+    @{{_board}} validate --rg "{{rg}}"
 
 # Preview what would change
-what-if name env=default_env:
-    @{{_board}} what-if {{name}} --env {{env}} --region-short {{default_region}}
+what-if name rg=default_rg:
+    @{{_board}} what-if {{name}} --rg "{{rg}}"
 
 # ── VM Operations ──
 
 # Start a board
-start name env=default_env:
-    @{{_board}} vm start {{name}} --env {{env}}
+start name rg=default_rg:
+    @{{_board}} vm start {{name}} --rg "{{rg}}"
 
 # Stop (deallocate) a board
-stop name env=default_env:
-    @{{_board}} vm stop {{name}} --env {{env}}
+stop name rg=default_rg:
+    @{{_board}} vm stop {{name}} --rg "{{rg}}"
 
 # SSH into a board (auto-detects auth method: Entra ID or SSH key)
 ssh name *args:
     @{{_board}} vm ssh {{name}} {{args}}
 
 # Show board status
-status name env=default_env:
-    @{{_board}} vm status {{name}} --env {{env}}
+status name rg=default_rg:
+    @{{_board}} vm status {{name}} --rg "{{rg}}"
 
 # List all boards and their status
-list env=default_env:
-    @{{_board}} vm ls --env {{env}}
+list rg=default_rg:
+    @{{_board}} vm ls --rg "{{rg}}"
 
 # ── Access Control ──
 
 # Grant access to a developer (role: admin, developer, or viewer)
-grant-access name email env=default_env role="developer":
-    @{{_board}} vm grant-access {{email}} {{name}} --env {{env}} --role {{role}}
+grant-access name email rg=default_rg role="developer":
+    @{{_board}} vm grant-access {{email}} {{name}} --rg "{{rg}}" --role {{role}}
 
 # ── Teardown ──
 
 # Delete a single board and all associated resources
-delete-vm name env=default_env confirm="":
+delete-vm name rg=default_rg confirm="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "{{confirm}}" == "yes" ]]; then
-        {{_board}} vm delete {{name}} --env {{env}} --yes
+        {{_board}} vm delete {{name}} --rg "{{rg}}" --yes
     else
-        {{_board}} vm delete {{name}} --env {{env}}
+        {{_board}} vm delete {{name}} --rg "{{rg}}"
     fi
 
-# Delete entire environment (nuclear option, pass confirm=yes to skip prompt)
-destroy-all env=default_env confirm="":
+# Delete every board-managed resource inside the resource group (NOT the RG itself)
+destroy-all rg=default_rg confirm="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "{{confirm}}" == "yes" ]]; then
-        {{_board}} destroy --env {{env}} --region-short {{default_region}} --yes
+        {{_board}} destroy --rg "{{rg}}" --yes
     else
-        {{_board}} destroy --env {{env}} --region-short {{default_region}}
+        {{_board}} destroy --rg "{{rg}}"
     fi
 
 # ── SSH Config ──
 
 # Print SSH config block for a developer (auto-detects auth method)
-ssh-config name env=default_env:
-    @{{_board}} ssh-config show {{name}} --env {{env}}
+ssh-config name rg=default_rg:
+    @{{_board}} ssh-config show {{name}} --rg "{{rg}}"
 
 # Write SSH config block to ~/.ssh/config (idempotent, auto-detects auth method)
-ssh-config-write name env=default_env:
-    @{{_board}} ssh-config write {{name}} --env {{env}}
+ssh-config-write name rg=default_rg:
+    @{{_board}} ssh-config write {{name}} --rg "{{rg}}"
 
 # Remove SSH config block for a board
 ssh-config-remove name:
@@ -110,12 +105,12 @@ ssh-config-remove name:
 # ── Board Passes ──
 
 # Create a board pass (encrypted starter kit) for a developer
-export-pass name env=default_env:
-    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}}
+export-pass name rg=default_rg:
+    @{{_board}} export-pass {{name}} --rg "{{rg}}"
 
 # Create a board pass forcing SSH key auth (regardless of VM tag)
-export-ssh-pass name env=default_env:
-    @{{_board}} export-pass {{name}} --env {{env}} --region {{default_location}} --region-short {{default_region}} --auth ssh-key
+export-ssh-pass name rg=default_rg:
+    @{{_board}} export-pass {{name}} --rg "{{rg}}" --auth ssh-key
 
 # ── Utilities ──
 
@@ -128,9 +123,16 @@ smoke-test name:
     @{{_board}} smoke-test {{name}}
 
 # Check cloud-init status on a board
-cloud-init-status name env=default_env:
+cloud-init-status name rg=default_rg:
     #!/usr/bin/env bash
     set -euo pipefail
+    : "${BOARD_RG:=}"
+    RG="{{rg}}"
+    if [[ -z "$RG" ]]; then
+        echo "ERROR: resource group required. Pass as second arg or set BOARD_RG."
+        exit 1
+    fi
+    RG_SUFFIX="${RG#rg-}"
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
     KEY="$HOME/.ssh/devvm-{{name}}"
     # Use Entra cert-based SSH if no key file exists
@@ -139,15 +141,15 @@ cloud-init-status name env=default_env:
             'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
     else
         az ssh vm \
-            --resource-group "rg-{{env}}-{{default_region}}-devvm" \
-            --name "vm-{{env}}-{{default_region}}-devvm-{{name}}" \
+            --resource-group "$RG" \
+            --name "vm-${RG_SUFFIX}-{{name}}" \
             -- 'cloud-init status --long && test -f ~/.cloud-init-complete && echo "Bootstrap: COMPLETE" || echo "Bootstrap: IN PROGRESS"'
     fi
 
 # ── Browser Tools ──
 
 # Access Cockpit system admin UI via SSH tunnel (localhost:9091 → VM:9190)
-cockpit name env=default_env:
+cockpit name:
     #!/usr/bin/env bash
     set -euo pipefail
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
@@ -173,7 +175,7 @@ cockpit name env=default_env:
     fi
 
 # Access Portainer Docker management UI via SSH tunnel (localhost:9444 → VM:9443)
-portainer name env=default_env:
+portainer name:
     #!/usr/bin/env bash
     set -euo pipefail
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
@@ -200,7 +202,7 @@ portainer name env=default_env:
     fi
 
 # Access code-server via SSH tunnel (opens browser IDE at localhost:8080)
-code-server name env=default_env:
+code-server name:
     #!/usr/bin/env bash
     set -euo pipefail
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
@@ -226,7 +228,7 @@ code-server name env=default_env:
     $SSH_CMD -L 8080:localhost:8080 -N
 
 # Forward all listening ports from a VM to localhost (dynamic discovery)
-tunnel-all name env=default_env:
+tunnel-all name:
     #!/usr/bin/env bash
     set -euo pipefail
     source cli/scripts/board-ssh.sh
@@ -235,7 +237,7 @@ tunnel-all name env=default_env:
 # ── VS Code Tunnel ──
 
 # Set up VS Code Tunnel on a board (interactive GitHub auth)
-tunnel-setup name env=default_env:
+tunnel-setup name:
     #!/usr/bin/env bash
     set -euo pipefail
     HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
@@ -301,15 +303,15 @@ browser-ide name:
 
 # Show policy enforcement rules
 policies:
-    @{{_board}} policies show
+    @{{_board}} policies
 
 # Show cost breakdown for all boards
-costs env=default_env:
-    @{{_board}} costs --env {{env}}
+costs rg=default_rg:
+    @{{_board}} costs --rg "{{rg}}"
 
 # Show cost breakdown for a specific developer
-costs-dev name env=default_env:
-    @{{_board}} costs --env {{env}} --developer {{name}}
+costs-dev name rg=default_rg:
+    @{{_board}} costs --rg "{{rg}}" --developer {{name}}
 
 # ── Project Dev Workflow ──
 
@@ -345,9 +347,9 @@ project-status name:
 
 # ── Fleet Operations ──
 
-# Show status of all boards in an environment
-fleet-status env=default_env:
-    @{{_board}} fleet --env {{env}}
+# Show status of all boards in a resource group
+fleet-status rg=default_rg:
+    @{{_board}} fleet --rg "{{rg}}"
 
 # Auto-detect project stack and generate a manifest
 init:
@@ -360,12 +362,12 @@ wait-ready name:
     @{{_board}} wait-ready {{name}}
 
 # Preflight checks before deploying a board
-preflight name env=default_env sku=default_sku:
-    @{{_board}} preflight {{name}} --env {{env}} --sku {{sku}} --location {{default_location}} --region-short {{default_region}}
+preflight name rg=default_rg sku=default_sku:
+    @{{_board}} preflight {{name}} --rg "{{rg}}" --sku {{sku}}
 
 # Provision a board from zero to ready (one command does everything)
-provision name env=default_env sku=default_sku:
-    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_ENVIRONMENT={{env}} BOARD_VM_SKU={{sku}} {{_board}} up --non-interactive
+provision name rg=default_rg sku=default_sku:
+    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_RG={{rg}} BOARD_VM_SKU={{sku}} {{_board}} up --non-interactive
 
 # Rotate SSH key for a board (invalidates existing board passes)
 rotate-key name:
@@ -420,8 +422,8 @@ test-cov:
     cd cli && uv run pytest --cov=board --cov-report=term-missing
 
 # Dry run: validate setup inputs without touching Azure
-dry-run name="testuser":
-    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_ENVIRONMENT=personal {{_board}} up --dry-run --non-interactive
+dry-run name="testuser" rg=default_rg:
+    BOARD_NON_INTERACTIVE=1 BOARD_DEV_NAME={{name}} BOARD_RG={{rg}} {{_board}} up --dry-run --non-interactive
 
 # Test cloud-init locally (requires: brew install multipass, ~5-8 min)
 test-cloud-init:

@@ -10,8 +10,10 @@ from typing import Any
 
 import typer
 
+from board.azure.vm_tags import resolve_auth_method
 from board.cli import vm_app
 from board.core import config as cfg
+from board.core.errors import BoardError
 from board.ui import console as con
 
 
@@ -42,30 +44,6 @@ def _rg_location(rg: str) -> str:
     cache[rg] = location
     _rg_location._cache = cache  # type: ignore[attr-defined]
     return location
-
-
-def _resolve_auth_method(rg: str, vm: str) -> str:
-    """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
-    result = subprocess.run(  # noqa: S603, S607
-        [
-            "az",
-            "vm",
-            "show",
-            "--resource-group",
-            rg,
-            "--name",
-            vm,
-            "--query",
-            'tags."auth-method"',
-            "-o",
-            "tsv",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    tag = result.stdout.strip()
-    return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
 
 
 def _get_power_state(rg: str, vm: str) -> str:
@@ -182,7 +160,11 @@ def ssh(
             raise typer.Exit(0)
         asyncio.run(_start_vm(rg_name, vm))
 
-    auth_method = _resolve_auth_method(rg_name, vm)
+    try:
+        auth_method = resolve_auth_method(rg_name, vm)
+    except BoardError as exc:
+        con.error(str(exc))
+        raise typer.Exit(1) from exc
 
     if auth_method == "entra-id":
         alias = cfg.ssh_host_alias(name)
