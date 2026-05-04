@@ -10,13 +10,17 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 from board.azure.auth import get_credential, get_subscription_id, get_tenant_id, list_subscriptions
 from board.azure.az import az_json, az_text
-from board.azure.deployment import bicep_build, deploy
+from board.azure.deployment import bicep_build, deploy, ensure_network
 from board.core.errors import BoardError, DeploymentError
 
 # Store real sleep before any patching so yielding mock can use it.
@@ -642,3 +646,160 @@ class TestBicepBuildIntegration:
             pytest.raises(DeploymentError, match="not valid JSON"),
         ):
             await bicep_build(Path("/fake/main.bicep"))
+
+
+# ── Shared per-RG network contract ──
+
+
+class TestSharedNetworkContract:
+    """Two boards into the same RG must share one vnet+subnet, and each VM gets
+    its own NSG (parameterised by developerName) so traffic stays scoped."""
+
+    @pytest.mark.asyncio
+    async def test_first_board_creates_network_second_reuses(self) -> None:
+        """First ensure_network() deploys network.bicep; second reuses the vnet."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        succeeded_vnet = SimpleNamespace(
+            id=(
+                "/subscriptions/x/resourceGroups/rg-myrg/providers/"
+                "Microsoft.Network/virtualNetworks/vnet-myrg"
+            ),
+            provisioning_state="Succeeded",
+        )
+        succeeded_subnet = SimpleNamespace(
+            id=(
+                "/subscriptions/x/resourceGroups/rg-myrg/providers/"
+                "Microsoft.Network/virtualNetworks/vnet-myrg/subnets/snet-myrg"
+            ),
+            provisioning_state="Succeeded",
+        )
+
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.side_effect = [
+            ResourceNotFoundError("not found"),  # first call: missing
+            succeeded_vnet,  # second call: now exists
+        ]
+        mock_client.subnets.get.return_value = succeeded_subnet
+
+        with (
+            patch(
+                "board.azure.deployment.NetworkManagementClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "board.azure.deployment.bicep_build",
+                new_callable=AsyncMock,
+            ) as bicep_mock,
+            patch(
+                "board.azure.deployment.deploy",
+                new_callable=AsyncMock,
+            ) as deploy_mock,
+        ):
+            bicep_mock.return_value = {"some": "template"}
+            deploy_mock.return_value = {
+                "vnetResourceId": (
+                    "/subscriptions/x/resourceGroups/rg-myrg/providers/"
+                    "Microsoft.Network/virtualNetworks/vnet-myrg"
+                ),
+                "subnetResourceId": (
+                    "/subscriptions/x/resourceGroups/rg-myrg/providers/"
+                    "Microsoft.Network/virtualNetworks/vnet-myrg/subnets/snet-myrg"
+                ),
+            }
+
+            result1 = await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-myrg",
+                prefix="myrg",
+                location="australiaeast",
+                tags={"env": "personal"},
+                network_bicep_path=Path("/fake/network.bicep"),
+            )
+            result2 = await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-myrg",
+                prefix="myrg",
+                location="australiaeast",
+                tags={"env": "personal"},
+                network_bicep_path=Path("/fake/network.bicep"),
+            )
+
+        # Both calls return the same vnet + subnet IDs
+        assert result1[0].endswith("/vnet-myrg")
+        assert result1[1].endswith("/snet-myrg")
+        assert result1 == result2
+
+        # Network deploy ran exactly once (first call only)
+        assert deploy_mock.await_count == 1
+        assert bicep_mock.await_count == 1
+
+        # virtual_networks.get ran twice (once per ensure_network call)
+        assert mock_client.virtual_networks.get.call_count == 2
+
+    def test_second_board_nsg_name_includes_developer(self) -> None:
+        """Compiled ARM template parameterises NSG names by developerName so two
+        boards in one RG get distinct NSGs."""
+        repo_root = Path(__file__).resolve().parents[3]
+        main_json_path = repo_root / "infra" / "main.json"
+        if not main_json_path.exists():
+            pytest.skip("infra/main.json not found (running outside full repo)")
+
+        template = json.loads(main_json_path.read_text())
+
+        def _walk(node: object) -> Iterator[dict[str, object]]:
+            """Yield every dict in a possibly-nested ARM template structure."""
+            if isinstance(node, dict):
+                yield node
+                for v in node.values():
+                    yield from _walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    yield from _walk(v)
+
+        # Find every resource of type Microsoft.Network/networkSecurityGroups
+        # (these may be nested inside Microsoft.Resources/deployments modules).
+        nsg_resources = [
+            d
+            for d in _walk(template)
+            if isinstance(d, dict) and d.get("type") == "Microsoft.Network/networkSecurityGroups"
+        ]
+        assert nsg_resources, (
+            "Expected at least one Microsoft.Network/networkSecurityGroups resource "
+            "in compiled main.json"
+        )
+
+        # The NSG resource name itself uses parameters('name') because it sits
+        # inside an AVM module — the developerName interpolation happens where
+        # the parent main.bicep passes the `name` parameter to that module.
+        # Locate the parent deployment module(s) that wrap an NSG, and assert
+        # the `name` value passed in references developerName.
+        nsg_module_param_names: list[str] = []
+        for r in template.get("resources", []):
+            if r.get("type") != "Microsoft.Resources/deployments":
+                continue
+            nested_resources = r.get("properties", {}).get("template", {}).get("resources") or {}
+            # nested_resources can be a dict (symbolic-name format) or list.
+            nested_iter: list[dict[str, object]] = []
+            if isinstance(nested_resources, dict):
+                nested_iter = list(nested_resources.values())
+            elif isinstance(nested_resources, list):
+                nested_iter = nested_resources
+            has_nsg = any(
+                isinstance(nr, dict) and nr.get("type") == "Microsoft.Network/networkSecurityGroups"
+                for nr in nested_iter
+            )
+            if has_nsg:
+                name_param = (
+                    r.get("properties", {}).get("parameters", {}).get("name", {}).get("value", "")
+                )
+                nsg_module_param_names.append(str(name_param))
+
+        assert nsg_module_param_names, "No deployment module wrapping an NSG was found"
+        # At least one NSG module must have its `name` parameterised by developerName.
+        assert any("developerName" in n for n in nsg_module_param_names), (
+            f"Expected NSG module name to reference developerName so two boards "
+            f"in one RG get distinct NSGs. Got names: {nsg_module_param_names}"
+        )

@@ -6,13 +6,14 @@ All Azure SDK clients are mocked. No real Azure calls are made.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from board.azure.compute import list_vms
-from board.azure.deployment import bicep_build, deploy, verify_resource_group
+from board.azure.deployment import bicep_build, deploy, ensure_network, verify_resource_group
 from board.azure.keyvault import (
     create_or_recover_vault,
     ensure_secrets_officer_role,
@@ -564,6 +565,236 @@ class TestVerifyResourceGroup:
                 name="rg-test",
                 principal_id="",
             )
+
+
+# ── ensure_network Tests ──
+
+
+def _vnet_object(
+    vnet_id: str = "/subscriptions/sub-123/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test",
+    state: str = "Succeeded",
+) -> SimpleNamespace:
+    """Mock vnet object with id + provisioning_state, matching SDK shape."""
+    return SimpleNamespace(id=vnet_id, provisioning_state=state)
+
+
+def _subnet_object(
+    subnet_id: str = (
+        "/subscriptions/sub-123/resourceGroups/rg-test/providers/Microsoft.Network"
+        "/virtualNetworks/vnet-test/subnets/snet-test"
+    ),
+    state: str = "Succeeded",
+) -> SimpleNamespace:
+    """Mock subnet object with id + provisioning_state, matching SDK shape."""
+    return SimpleNamespace(id=subnet_id, provisioning_state=state)
+
+
+class TestEnsureNetwork:
+    """Tests for ensure_network: idempotent shared-network discovery + deploy."""
+
+    @pytest.mark.asyncio
+    async def test_existing_vnet_and_subnet_returns_ids_no_deploy(self) -> None:
+        """When both vnet+subnet exist and Succeeded, return IDs without deploying."""
+        vnet_id = (
+            "/subscriptions/sub-123/resourceGroups/rg-test/providers/Microsoft.Network"
+            "/virtualNetworks/vnet-test"
+        )
+        subnet_id = f"{vnet_id}/subnets/snet-test"
+
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object(vnet_id=vnet_id)
+        mock_client.subnets.get.return_value = _subnet_object(subnet_id=subnet_id)
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch("board.azure.deployment.bicep_build", new_callable=AsyncMock) as bicep_mock,
+            patch("board.azure.deployment.deploy", new_callable=AsyncMock) as deploy_mock,
+        ):
+            result = await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="test",
+                location="australiaeast",
+                tags={"environment": "dev"},
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        assert result == (vnet_id, subnet_id)
+        bicep_mock.assert_not_awaited()
+        deploy_mock.assert_not_awaited()
+        mock_client.virtual_networks.get.assert_called_once_with("rg-test", "vnet-test")
+        mock_client.subnets.get.assert_called_once_with("rg-test", "vnet-test", "snet-test")
+
+    @pytest.mark.asyncio
+    async def test_missing_vnet_compiles_and_deploys_network_bicep(self) -> None:
+        """When vnet is missing, compile network.bicep and deploy it."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.side_effect = ResourceNotFoundError("vnet not found")
+
+        template_stub = {"$schema": "https://schema.management.azure.com/...", "resources": []}
+        deploy_outputs = {"vnetResourceId": "/v", "subnetResourceId": "/s"}
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch(
+                "board.azure.deployment.bicep_build",
+                new_callable=AsyncMock,
+                return_value=template_stub,
+            ) as bicep_mock,
+            patch(
+                "board.azure.deployment.deploy",
+                new_callable=AsyncMock,
+                return_value=deploy_outputs,
+            ) as deploy_mock,
+        ):
+            result = await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="test",
+                location="australiaeast",
+                tags={"environment": "dev"},
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        assert result == ("/v", "/s")
+        bicep_mock.assert_awaited_once_with(Path("/tmp/network.bicep"))
+        assert deploy_mock.await_count == 1
+        await_args = deploy_mock.await_args
+        assert await_args is not None
+        assert await_args.kwargs["parameters"] == {
+            "prefix": "test",
+            "location": "australiaeast",
+            "tags": {"environment": "dev"},
+        }
+        # Subnet client must not be queried when vnet is missing.
+        mock_client.subnets.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_vnet_missing_subnet_raises(self) -> None:
+        """If vnet exists but subnet does not, raise BoardError naming both."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object()
+        mock_client.subnets.get.side_effect = ResourceNotFoundError("subnet not found")
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch("board.azure.deployment.bicep_build", new_callable=AsyncMock),
+            patch("board.azure.deployment.deploy", new_callable=AsyncMock),
+            pytest.raises(BoardError) as exc_info,
+        ):
+            await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="myprefix",
+                location="australiaeast",
+                tags={},
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        msg = str(exc_info.value)
+        assert "vnet-myprefix" in msg
+        assert "snet-myprefix" in msg
+
+    @pytest.mark.asyncio
+    async def test_existing_vnet_subnet_failed_state_raises(self) -> None:
+        """Subnet in non-Succeeded state raises BoardError naming subnet + state."""
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object()
+        mock_client.subnets.get.return_value = _subnet_object(state="Failed")
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch("board.azure.deployment.bicep_build", new_callable=AsyncMock),
+            patch("board.azure.deployment.deploy", new_callable=AsyncMock),
+            pytest.raises(BoardError) as exc_info,
+        ):
+            await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="myprefix",
+                location="australiaeast",
+                tags={},
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        msg = str(exc_info.value)
+        assert "snet-myprefix" in msg
+        assert "Failed" in msg
+
+    @pytest.mark.asyncio
+    async def test_existing_vnet_in_non_succeeded_state_raises(self) -> None:
+        """Vnet in Updating state raises BoardError; subnet must NOT be queried."""
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object(state="Updating")
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch("board.azure.deployment.bicep_build", new_callable=AsyncMock),
+            patch("board.azure.deployment.deploy", new_callable=AsyncMock),
+            pytest.raises(BoardError) as exc_info,
+        ):
+            await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="myprefix",
+                location="australiaeast",
+                tags={},
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        msg = str(exc_info.value)
+        assert "vnet-myprefix" in msg
+        assert "Updating" in msg
+        mock_client.subnets.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tags_and_prefix_passed_through_to_deploy(self) -> None:
+        """Tenant-mandated tags are forwarded to deploy() verbatim."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.side_effect = ResourceNotFoundError("vnet not found")
+
+        custom_tags = {"costcenter": "CC-123", "owner": "barney"}
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch(
+                "board.azure.deployment.bicep_build",
+                new_callable=AsyncMock,
+                return_value={"resources": []},
+            ),
+            patch(
+                "board.azure.deployment.deploy",
+                new_callable=AsyncMock,
+                return_value={"vnetResourceId": "/v", "subnetResourceId": "/s"},
+            ) as deploy_mock,
+        ):
+            await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="myprefix",
+                location="australiaeast",
+                tags=custom_tags,
+                network_bicep_path=Path("/tmp/network.bicep"),
+            )
+
+        await_args = deploy_mock.await_args
+        assert await_args is not None
+        params = await_args.kwargs["parameters"]
+        assert params["tags"] == {"costcenter": "CC-123", "owner": "barney"}
+        assert params["prefix"] == "myprefix"
+        assert params["location"] == "australiaeast"
 
 
 # ── VM List Parsing Tests ──
