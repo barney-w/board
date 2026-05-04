@@ -9,9 +9,7 @@ from board.models.bundle import BundlePayload
 
 def build_payload(
     developer_name: str,
-    environment: str,
     region: str,
-    region_short: str,
     hostname: str,
     username: str,
     auth_method: str,
@@ -32,9 +30,7 @@ def build_payload(
 
     return BundlePayload(
         developer_name=developer_name,
-        environment=environment,
         region=region,
-        region_short=region_short,
         hostname=hostname,
         username=username,
         auth_method=auth_method,

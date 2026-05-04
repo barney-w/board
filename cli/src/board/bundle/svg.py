@@ -38,9 +38,8 @@ def _time_remaining(valid_until: str) -> tuple[str, bool]:
 def render_board_pass_svg(
     *,
     developer_name: str,
-    environment: str,
+    resource_group: str,
     region: str,
-    region_short: str,
     vm_name: str,
     auth_method: str,
     issued_at: str,
@@ -49,9 +48,10 @@ def render_board_pass_svg(
     """Return a complete SVG string for the board pass card."""
     initials = escape(developer_name[:2].upper())
     name = escape(developer_name)
-    env = escape(environment)
+    rg = escape(resource_group)
     reg = escape(region)
-    zone = escape(region_short.upper())
+    # Pull a 3-letter zone hint from the region (e.g. australiaeast -> AUS).
+    zone = escape(region[:3].upper() if region else "---")
     vm_display = escape(f"devvm-{developer_name}")
     vm_full = escape(vm_name)
     auth = escape(auth_method)
@@ -127,7 +127,7 @@ def render_board_pass_svg(
     <text x="84" y="91" font-size="16" font-weight="600" fill="#e2e8f0"
           class="sans">{name}</text>
     <text x="84" y="108" font-size="11" fill="#64748b"
-          class="sans">{env} environment &#183; {reg}</text>
+          class="sans">{rg} &#183; {reg}</text>
 
     <!-- Stamp -->
     <g transform="translate(540, 80)">
@@ -213,7 +213,7 @@ def render_board_pass_svg(
     <text x="540" y="336" font-size="13" font-weight="600" fill="#94a3b8"
           class="sans" text-anchor="end">{name}</text>
     <text x="540" y="354" font-size="10" fill="#475569"
-          class="sans" text-anchor="end">{reg} &#183; {env}</text>
+          class="sans" text-anchor="end">{reg} &#183; {rg}</text>
 
     <rect x="560" y="322" width="44" height="20" rx="4" fill="#0ea5e9" opacity="0.12"/>
     <text x="582" y="337" text-anchor="middle" font-size="13" font-weight="700" fill="#38bdf8">{zone}</text>

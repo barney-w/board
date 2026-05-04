@@ -407,9 +407,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const cfg = getConfig();
       const payload: BundlePayload = {
         developerName: cfg.developerName,
-        environment: cfg.environment,
         region: cfg.region,
-        regionShort: cfg.regionShort,
         hostname: getHostname(cfg),
         username: 'devuser',
         authMethod: cfg.authMethod,
@@ -459,14 +457,14 @@ export function activate(context: vscode.ExtensionContext): void {
       const terminal = vscode.window.createTerminal({
         name: 'code-server tunnel',
         shellPath: 'ssh',
-        shellArgs: ['-L', '8080:localhost:8080', '-N', hostAlias],
+        shellArgs: ['-L', '18080:localhost:8080', '-N', hostAlias],
         iconPath: new vscode.ThemeIcon('globe'),
       });
       terminal.show();
 
       // Wait briefly for tunnel to establish, then open browser
       setTimeout(() => {
-        vscode.env.openExternal(vscode.Uri.parse('http://localhost:8080'));
+        vscode.env.openExternal(vscode.Uri.parse('http://localhost:18080'));
       }, 2000);
 
       // No password needed — code-server uses auth:none (SSH tunnel is the auth)
@@ -542,9 +540,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const cfg = getConfig();
     const remotePayload: BundlePayload = {
       developerName: cfg.developerName,
-      environment: cfg.environment,
       region: cfg.region,
-      regionShort: cfg.regionShort,
       hostname: getHostname(cfg),
       username: 'devuser',
       authMethod: cfg.authMethod,

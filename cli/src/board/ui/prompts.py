@@ -21,7 +21,7 @@ async def input_text(prompt: str, default: str = "") -> str:
     """Text input. Non-interactive: return *default*."""
     if _is_non_interactive():
         return default
-    result = await questionary.text(prompt, default=default).ask_async()
+    result = await questionary.text(prompt, default=default, qmark="").ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]
@@ -44,7 +44,9 @@ async def input_validated(
             return True
         return message
 
-    result = await questionary.text(prompt, default=default, validate=_validate).ask_async()
+    result = await questionary.text(
+        prompt, default=default, validate=_validate, qmark=""
+    ).ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]
@@ -60,7 +62,9 @@ async def choose(prompt: str, choices: list[str], default: str = "") -> str:
             return env_val
         return default or (choices[0] if choices else "")
 
-    result = await questionary.select(prompt, choices=choices, default=default or None).ask_async()
+    result = await questionary.select(
+        prompt, choices=choices, default=default or None, qmark=""
+    ).ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]
@@ -79,7 +83,7 @@ async def checklist(
         return defaults if defaults is not None else []
 
     q_choices = [Choice(title=c, checked=(c in (defaults or []))) for c in choices]
-    result = await questionary.checkbox(prompt, choices=q_choices).ask_async()
+    result = await questionary.checkbox(prompt, choices=q_choices, qmark="").ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]
@@ -89,7 +93,7 @@ async def confirm(prompt: str, default: bool = True) -> bool:
     """Yes/no confirmation. Non-interactive: return True."""
     if _is_non_interactive():
         return True
-    result = await questionary.confirm(prompt, default=default).ask_async()
+    result = await questionary.confirm(prompt, default=default, qmark="").ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]
@@ -99,7 +103,7 @@ async def secret(prompt: str) -> str:
     """Password input. Non-interactive: return empty string."""
     if _is_non_interactive():
         return ""
-    result = await questionary.password(prompt).ask_async()
+    result = await questionary.password(prompt, qmark="").ask_async()
     if result is None:
         raise KeyboardInterrupt
     return result  # type: ignore[no-any-return]

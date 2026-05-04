@@ -36,24 +36,38 @@ if not defined PASS (
     exit /b 1
 )
 
-REM Install extension (skip if already installed to avoid unnecessary reload)
-code --list-extensions 2>nul | findstr /i "barney-w.board" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo   Board extension already installed.
-) else (
-    echo   Installing Board extension...
-    code --install-extension "%VSIX%"
-    echo   Done.
-    REM Give VS Code time to load the new extension before opening the file
-    timeout /t 3 /nobreak >nul
-)
+REM Always install the bundled extension with --force so the version shipped
+REM with this pass wins over any older installed version. Idempotent when the
+REM bundled version matches what's already installed.
+echo   Installing Board extension...
+code --install-extension "%VSIX%" --force
+echo   Done.
+REM Give VS Code time to load the new extension before opening the file
+timeout /t 3 /nobreak >nul
 echo.
+
+REM Detect auth method from the board pass JSON (requires python3 or python)
+set "AUTH_METHOD=ssh-key"
+where python3 >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "delims=" %%a in ('python3 -c "import json; print(json.load(open(r'%PASS%')).get('authMethod','ssh-key'))" 2^>nul') do set "AUTH_METHOD=%%a"
+) else (
+    where python >nul 2>&1
+    if %errorlevel% equ 0 (
+        for /f "delims=" %%a in ('python -c "import json; print(json.load(open(r'%PASS%')).get('authMethod','ssh-key'))" 2^>nul') do set "AUTH_METHOD=%%a"
+    )
+)
 
 REM Open the board pass in VS Code (triggers the import flow)
 echo   Opening your board pass in VS Code...
 code "%PASS%"
 echo.
 echo   VS Code is now importing your board pass.
-echo   For SSH-key boards, enter the passphrase your team lead gave you.
+if /i "%AUTH_METHOD%"=="entra-id" (
+    echo   No passphrase needed - Entra ID handles authentication.
+    echo   Click Connect when VS Code is ready.
+) else (
+    echo   Enter the passphrase your team lead gave you.
+)
 echo.
 pause

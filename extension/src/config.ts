@@ -2,9 +2,8 @@ import * as vscode from 'vscode';
 
 export interface BoardConfig {
   developerName: string;
-  environment: string;
+  resourceGroup: string;
   region: string;
-  regionShort: string;
   authMethod: 'ssh-key' | 'entra-id';
   autoStartVm: boolean;
   autoOpenTerminals: boolean;
@@ -17,9 +16,8 @@ export function getConfig(): BoardConfig {
   const cfg = vscode.workspace.getConfiguration('board');
   return {
     developerName: cfg.get<string>('developerName', ''),
-    environment: cfg.get<string>('environment', 'personal'),
+    resourceGroup: cfg.get<string>('resourceGroup', ''),
     region: cfg.get<string>('region', 'australiaeast'),
-    regionShort: cfg.get<string>('regionShort', 'aue'),
     authMethod: cfg.get<'ssh-key' | 'entra-id'>('authMethod', 'entra-id'),
     autoStartVm: cfg.get<boolean>('autoStartVm', true),
     autoOpenTerminals: cfg.get<boolean>('autoOpenTerminals', true),
@@ -28,10 +26,10 @@ export function getConfig(): BoardConfig {
   };
 }
 
-/** Check whether minimum required settings (developerName) are configured */
+/** Check whether minimum required settings (developerName, resourceGroup) are configured */
 export function isConfigured(): boolean {
   const cfg = getConfig();
-  return cfg.developerName.length > 0;
+  return cfg.developerName.length > 0 && cfg.resourceGroup.length > 0;
 }
 
 /** Derive the SSH host alias: `devvm-<name>` */
@@ -44,14 +42,17 @@ export function getHostname(config: BoardConfig): string {
   return `devvm-${config.developerName}.${config.region}.cloudapp.azure.com`;
 }
 
-/** Derive the resource group name: `rg-<env>-<regionShort>-devvm` */
+/** Return the configured resource group name (must already exist in Azure) */
 export function getResourceGroup(config: BoardConfig): string {
-  return `rg-${config.environment}-${config.regionShort}-devvm`;
+  return config.resourceGroup;
 }
 
-/** Derive the VM name: `vm-<env>-<regionShort>-devvm-<name>` */
+/** Derive the VM name: `vm-<rg-suffix>-<name>`, where rg-suffix strips a leading `rg-`. */
 export function getVmName(config: BoardConfig): string {
-  return `vm-${config.environment}-${config.regionShort}-devvm-${config.developerName}`;
+  const suffix = config.resourceGroup.startsWith('rg-')
+    ? config.resourceGroup.slice(3)
+    : config.resourceGroup;
+  return `vm-${suffix}-${config.developerName}`;
 }
 
 /** Derive the SSH key path: `~/.ssh/devvm-<name>` */

@@ -39,9 +39,7 @@ export class BoardPassEditorProvider implements vscode.CustomReadonlyEditorProvi
       const cfg = getConfig();
       payload = {
         developerName: cfg.developerName,
-        environment: cfg.environment,
         region: cfg.region,
-        regionShort: cfg.regionShort,
         hostname: getHostname(cfg),
         username: 'devuser',
         authMethod: cfg.authMethod,

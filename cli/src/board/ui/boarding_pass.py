@@ -29,9 +29,8 @@ def _truncate(text: str, max_len: int = 42) -> str:
 
 def render_boarding_pass(
     name: str,
-    environment: str,
+    resource_group: str,
     region: str,
-    region_short: str,
     hostname: str,
     auth_method: str,
     filename: str,
@@ -39,7 +38,8 @@ def render_boarding_pass(
     valid_until: str,
 ) -> None:
     """Render a decorative boarding pass to the console."""
-    zone = region_short.upper()
+    # Pull a 3-letter zone code from the region (e.g. australiaeast -> AUS).
+    zone = region[:3].upper() if region else "---"
     issued_short = issued_at.split("T")[0] if "T" in issued_at else issued_at
     expiry_short = valid_until.split("T")[0] if "T" in valid_until else valid_until
     initials = name[:2].upper()
@@ -63,7 +63,7 @@ def render_boarding_pass(
     body.append("]", style=ACCENT)
     body.append(f"  {name}", style="bold")
     body.append("\n")
-    body.append(f"     {environment} environment", style="dim")
+    body.append(f"     {resource_group}", style="dim")
     body.append("\n\n")
 
     # Row 1: labels

@@ -2,7 +2,7 @@
   "name": "board",
   "displayName": "Board",
   "description": "One-click connection to your Board cloud dev environment",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "publisher": "barney-w",
   "license": "Apache-2.0",
   "engines": { "vscode": "^1.96.0" },
@@ -45,21 +45,15 @@
           "description": "Your developer name (e.g. jbloggs). Lowercase, alphanumeric, max 12 chars.",
           "pattern": "^([a-z][a-z0-9]{0,11})?$"
         },
-        "board.environment": {
+        "board.resourceGroup": {
           "type": "string",
-          "default": "personal",
-          "enum": ["personal", "sandbox"],
-          "description": "Azure environment"
+          "default": "",
+          "description": "Azure resource group your board VM lives in (e.g. rg-platform-prod). Must already exist."
         },
         "board.region": {
           "type": "string",
           "default": "australiaeast",
-          "description": "Azure region (used for FQDN)"
-        },
-        "board.regionShort": {
-          "type": "string",
-          "default": "aue",
-          "description": "Short region code (used for resource naming)"
+          "description": "Azure region (used for the VM FQDN)"
         },
         "board.authMethod": {
           "type": "string",

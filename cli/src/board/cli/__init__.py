@@ -29,7 +29,6 @@ from board.cli.costs import costs_command  # noqa: E402
 from board.cli.export_pass import export_pass_command  # noqa: E402
 from board.cli.fleet import fleet_command  # noqa: E402
 from board.cli.infra import (  # noqa: E402
-    create_rg_command,
     create_vm_command,
     destroy_command,
     preflight_command,
@@ -53,7 +52,6 @@ app.command(name="costs")(costs_command)
 app.command(name="policies")(policies_show_command)
 
 # Infrastructure commands
-app.command(name="create-rg")(create_rg_command)
 app.command(name="create-vm")(create_vm_command)
 app.command(name="validate")(validate_command)
 app.command(name="what-if")(what_if_command)

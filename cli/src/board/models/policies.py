@@ -52,3 +52,4 @@ class PoliciesConfig(BaseModel):
     expiration: ExpirationPolicy = ExpirationPolicy()
     require_entra_auth: bool = True
     require_mfa: bool = True
+    security_group_name: str = "Board VM Users"

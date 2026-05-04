@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -53,9 +55,7 @@ class BundlePayload(BaseModel):
     model_config = ConfigDict(alias_generator=_to_camel, populate_by_name=True)
 
     developer_name: str
-    environment: str
     region: str
-    region_short: str
     hostname: str
     username: str
     auth_method: str = "entra-id"
@@ -91,4 +91,4 @@ class BundleEnvelope(BaseModel):
     tag: str = ""
     # Plaintext envelope fields (entra-id auth)
     auth_method: str = ""
-    payload: dict[str, str] | None = None
+    payload: dict[str, Any] | None = None

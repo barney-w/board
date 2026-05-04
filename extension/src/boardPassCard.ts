@@ -531,7 +531,7 @@ export function getBoardPassHtml(payload: BundlePayload): string {
         <div class="avatar">${avatar}</div>
         <div class="identity-info">
           <div class="identity-name">${escHtml(payload.developerName)}</div>
-          <div class="identity-role">${escHtml(payload.environment)} environment &middot; ${escHtml(payload.region)}</div>
+          <div class="identity-role">${escHtml(payload.resourceGroup)} &middot; ${escHtml(payload.region)}</div>
         </div>
       </div>
 
@@ -546,7 +546,7 @@ export function getBoardPassHtml(payload: BundlePayload): string {
           </div>
           <div class="field">
             <div class="field-label">Zone</div>
-            <div class="field-value large" style="color:var(--sky)">${escHtml(payload.regionShort.toUpperCase())}</div>
+            <div class="field-value large" style="color:var(--sky)">${escHtml(payload.region.slice(0, 3).toUpperCase())}</div>
           </div>
         </div>
 
@@ -592,12 +592,12 @@ export function getBoardPassHtml(payload: BundlePayload): string {
       <div class="pass-stub">
         <div class="stub-info">
           <div><strong>${escHtml(payload.developerName)}</strong></div>
-          <div>${escHtml(payload.region)} &middot; ${escHtml(payload.environment)}</div>
+          <div>${escHtml(payload.region)} &middot; ${escHtml(payload.resourceGroup)}</div>
           <div>Expires: ${formatDate(payload.validUntil)}</div>
         </div>
         <div class="stub-zone">
           <div class="stub-zone-label">Zone</div>
-          <div class="stub-zone-code">${escHtml(payload.regionShort.toUpperCase())}</div>
+          <div class="stub-zone-code">${escHtml(payload.region.slice(0, 3).toUpperCase())}</div>
         </div>
       </div>
     </div>
