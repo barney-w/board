@@ -139,9 +139,18 @@ export async function connect(context: vscode.ExtensionContext): Promise<void> {
       async () => refreshEntraCerts(config),
     );
     if (!certResult.success) {
-      vscode.window.showErrorMessage(
-        'Failed to refresh Entra ID certificates. Ensure you are signed in with "az login".',
-      );
+      const detail = (certResult.stderr || certResult.errorMessage || '').trim();
+      const az = certResult.azPath || 'az';
+      // Show the real az error so the user can act on it. Common causes:
+      //   - "az login" required
+      //   - az ssh extension missing (`az extension add --name ssh`)
+      //   - VS Code launched without Homebrew on PATH so az isn't found
+      //   - Wrong subscription / no RBAC on the VM
+      const message = detail
+        ? `Failed to refresh Entra ID certificates (${az}):\n${detail}`
+        : `Failed to refresh Entra ID certificates. Ensure you are signed in with "az login" and the az ssh extension is installed.`;
+      vscode.window.showErrorMessage(message, { modal: false });
+      console.error('[Board] cert refresh failed', certResult);
       return;
     }
 

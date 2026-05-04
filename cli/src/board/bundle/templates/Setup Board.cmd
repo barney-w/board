@@ -58,9 +58,13 @@ if %errorlevel% equ 0 (
     )
 )
 
-REM Open the board pass in VS Code (triggers the import flow)
+REM Open the board pass in a NEW VS Code window. A new window starts a fresh
+REM extension host that loads the freshly installed extension. Without
+REM --new-window, any already-open VS Code keeps the previous extension code in
+REM memory and the import flow can hit the old (encrypted-only) code path —
+REM producing a passphrase prompt for what should be a plaintext Entra ID pass.
 echo   Opening your board pass in VS Code...
-code "%PASS%"
+code --new-window "%PASS%"
 echo.
 echo   VS Code is now importing your board pass.
 if /i "%AUTH_METHOD%"=="entra-id" (

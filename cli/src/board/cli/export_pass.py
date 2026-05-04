@@ -13,33 +13,11 @@ from pathlib import Path
 
 import typer
 
+from board.azure.vm_tags import resolve_auth_method
 from board.core import config as cfg
+from board.core.errors import BoardError
 from board.ui import console as con
 from board.ui import prompts
-
-
-def _resolve_auth_method(rg: str, vm: str) -> str:
-    """Read the ``auth-method`` tag from the VM. Falls back to ``ssh-key``."""
-    result = subprocess.run(  # noqa: S603, S607
-        [
-            "az",
-            "vm",
-            "show",
-            "--resource-group",
-            rg,
-            "--name",
-            vm,
-            "--query",
-            'tags."auth-method"',
-            "-o",
-            "tsv",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    tag = result.stdout.strip()
-    return tag if tag in ("entra-id", "ssh-key") else "ssh-key"
 
 
 def _find_vsix() -> Path | None:
@@ -106,7 +84,11 @@ async def _run_export_pass(
         auth_method = auth_override
         con.info(f"Auth method: {auth_method} (forced)")
     else:
-        auth_method = _resolve_auth_method(rg, vm)
+        try:
+            auth_method = resolve_auth_method(rg, vm)
+        except BoardError as exc:
+            con.error(str(exc))
+            return
         con.info(f"Auth method: {auth_method}")
 
     # Read SSH keys (only needed for ssh-key auth)
