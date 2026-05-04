@@ -237,6 +237,7 @@ async def ensure_secrets_officer_role(
     subscription_id: str,
     vault_id: str,
     principal_id: str,
+    principal_type: str = "User",
 ) -> None:
     """Ensure a principal has the Key Vault Secrets Officer role on a vault.
 
@@ -246,7 +247,12 @@ async def ensure_secrets_officer_role(
         credential: Azure credential.
         subscription_id: Target subscription.
         vault_id: Full resource ID of the Key Vault.
-        principal_id: Object ID of the user or service principal.
+        principal_id: Object ID of the user, group, or service principal.
+        principal_type: "User", "Group", or "ServicePrincipal".
+
+    Raises:
+        BoardError: If the role assignment cannot be created (e.g. the caller
+            lacks ``Microsoft.Authorization/roleAssignments/write`` on the vault).
     """
     auth_client = AuthorizationManagementClient(credential, subscription_id)
     role_definition_id = (
@@ -278,7 +284,7 @@ async def ensure_secrets_officer_role(
     params = RoleAssignmentCreateParameters(
         role_definition_id=role_definition_id,
         principal_id=principal_id,
-        principal_type="User",
+        principal_type=principal_type,
     )  # type: ignore[call-arg]
     try:
         await asyncio.to_thread(
@@ -289,4 +295,61 @@ async def ensure_secrets_officer_role(
         )
         logger.info("Secrets Officer role assigned to %s", principal_id)
     except HttpResponseError as exc:
-        logger.warning("Could not assign Secrets Officer role: %s", exc)
+        msg = (
+            f"Could not assign 'Key Vault Secrets Officer' to principal "
+            f"{principal_id} on vault {vault_id}: {exc.message or exc}"
+        )
+        raise BoardError(msg) from exc
+
+
+async def set_secret_with_propagation_retry(
+    vault_url: str,
+    credential: Any,
+    secret_name: str,
+    value: str,
+    *,
+    max_retries: int = 12,
+    delay_seconds: float = 10.0,
+) -> None:
+    """Set a secret, retrying on 403s while a fresh RBAC role propagates.
+
+    A newly granted ``Key Vault Secrets Officer`` role can take 30 s -- 2 min
+    to take effect on the data plane. This helper retries on ``Forbidden``
+    responses for up to ``max_retries * delay_seconds`` total before failing
+    loudly with :class:`BoardError`.
+
+    Raises:
+        BoardError: If the secret cannot be written after all retries, or the
+            failure is not a transient RBAC propagation error.
+    """
+    last_exc: HttpResponseError | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            await set_secret(vault_url, credential, secret_name, value)
+            return
+        except HttpResponseError as exc:
+            last_exc = exc
+            is_forbidden = exc.status_code == 403 or "ForbiddenByRbac" in str(exc)
+            if not is_forbidden:
+                msg = f"Failed to set secret '{secret_name}' in {vault_url}: {exc.message or exc}"
+                raise BoardError(msg) from exc
+            if attempt == max_retries:
+                break
+            logger.info(
+                "RBAC still propagating for %s (attempt %d/%d), waiting %ss...",
+                secret_name,
+                attempt,
+                max_retries,
+                delay_seconds,
+            )
+            await asyncio.sleep(delay_seconds)
+
+    total_wait = max_retries * delay_seconds
+    msg = (
+        f"Failed to set secret '{secret_name}' in {vault_url} after "
+        f"{int(total_wait)}s of retries -- the caller still lacks data-plane "
+        f"access. Confirm the 'Key Vault Secrets Officer' role assignment is "
+        f"in place and re-run setup. Last error: "
+        f"{last_exc.message if last_exc else 'unknown'}"
+    )
+    raise BoardError(msg) from last_exc

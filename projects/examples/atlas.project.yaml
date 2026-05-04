@@ -1,0 +1,107 @@
+# projects/examples/atlas.project.yaml
+#
+# Template manifest for the Atlas web app + Foundry agent stack.
+#
+# To use:
+#   1. Copy this file to projects/atlas.project.yaml (gitignored).
+#   2. Fill in every <YOUR-...> placeholder with values from your own
+#      Azure tenant, Microsoft Foundry project, Power Platform environment,
+#      and Copilot Studio app registration.
+#   3. Do not commit your filled-in copy; identifiers are tenant-specific.
+
+name: atlas
+description: Atlas web app and Foundry agent tooling
+repo:
+  url: https://github.com/<YOUR-GITHUB-ORG>/<YOUR-ATLAS-REPO>.git
+  auth:
+    type: github-token
+    keyvault_secret: github-atlas-bootstrap-token
+    env_var: ATLAS_GITHUB_TOKEN
+    persist: false
+path: ~/projects/atlas
+dependencies: [surf-kit]
+
+requires:
+  tools: [node, pnpm, python3, uv, az, jq]
+  cloud_init: true
+
+install:
+  - label: Install web dependencies
+    run: cd web && pnpm install
+  - label: Install agent dependencies
+    run: cd agent && uv sync
+  - label: Verify web shims
+    run: cd web && pnpm verify:shims
+  - label: Typecheck web
+    run: cd web && pnpm typecheck
+  - label: Build web
+    run: cd web && pnpm build
+
+dev:
+  run: cd web && pnpm dev --host 0.0.0.0
+  description: Atlas Vite dev server with hot reload
+  tasks:
+    - label: Web typecheck
+      run: cd web && pnpm typecheck
+    - label: Web build
+      run: cd web && pnpm build
+    - label: Agent smoke
+      run: cd agent && FOUNDRY_PROJECT_ENDPOINT=https://<YOUR-FOUNDRY-RESOURCE>.services.ai.azure.com/api/projects/<YOUR-FOUNDRY-PROJECT> uv run python test.py "Find any SharePoint document and cite its title." --agent-name atlas-personal
+
+env:
+  file: web/.env.local
+  hardcoded:
+    VITE_FOUNDRY_ENDPOINT: https://<YOUR-FOUNDRY-RESOURCE>.services.ai.azure.com/api/projects/<YOUR-FOUNDRY-PROJECT>/openai/v1
+    VITE_FOUNDRY_AGENT_NAME: atlas-personal
+    VITE_FOUNDRY_MODEL_NAME: gpt-5.4-mini
+    VITE_MSAL_CLIENT_ID: <YOUR-MSAL-CLIENT-ID>
+    VITE_MSAL_TENANT_ID: <YOUR-MSAL-TENANT-ID>
+    VITE_PP_ENV_BASE_URL: https://<YOUR-DATAVERSE-ORG>.crm6.dynamics.com
+    VITE_PP_API_BASE_URL: https://<YOUR-DATAVERSE-ORG>.api.crm6.dynamics.com
+    VITE_PP_ENV_ID: <YOUR-PP-ENV-ID>
+    VITE_CS_AUTH_APP_ID: <YOUR-COPILOT-STUDIO-APP-ID>
+    VITE_CS_USER_SCOPE: api://<YOUR-COPILOT-STUDIO-APP-ID>/CopilotStudio.User
+    VITE_CS_DIRECT_CONNECT_URL_BASE: https://<YOUR-PP-CONNECT-HOST>.<YOUR-PP-REGION>.environment.api.powerplatform.com
+  required:
+    - VITE_FOUNDRY_ENDPOINT
+    - VITE_FOUNDRY_AGENT_NAME
+    - VITE_MSAL_CLIENT_ID
+    - VITE_MSAL_TENANT_ID
+
+vscode:
+  ports:
+    "5175": { label: "Atlas Web", auto_forward: notify }
+
+  tasks:
+    - label: Dev Server
+      command: cd web && pnpm dev --host 0.0.0.0
+      background: true
+    - label: Type Check
+      command: cd web && pnpm typecheck
+    - label: Build
+      command: cd web && pnpm build
+      group: build
+    - label: Verify Shims
+      command: cd web && pnpm verify:shims
+    - label: Agent Smoke
+      command: cd agent && FOUNDRY_PROJECT_ENDPOINT=https://<YOUR-FOUNDRY-RESOURCE>.services.ai.azure.com/api/projects/<YOUR-FOUNDRY-PROJECT> uv run python test.py "Find any SharePoint document and cite its title." --agent-name atlas-personal
+
+  settings:
+    typescript.tsdk: ./web/node_modules/typescript/lib
+
+workspace:
+  services:
+    - name: Atlas Web
+      command: cd web && pnpm dev --host 0.0.0.0
+
+health:
+  - label: Web dependencies
+    check: test -d web/node_modules
+  - label: Agent dependencies
+    check: test -d agent/.venv
+  - label: Agent environment
+    check: test -f agent/pyproject.toml
+  - label: Web typecheck
+    check: cd web && pnpm typecheck
+  - label: Built agent target
+    check: cd web && pnpm build >/dev/null && grep -Rqs "atlas-personal" dist && ! grep -Rqs "docsearch-personal" dist

@@ -2,7 +2,14 @@
 
 name: surf-kit
 description: Component library (React/pnpm)
-repo: https://github.com/barney-w/surf-kit
+repo:
+  url: https://github.com/barney-w/surf-kit-atlas.git
+  ref: feat/atlas-reskin
+  auth:
+    type: github-token
+    keyvault_secret: github-atlas-bootstrap-token
+    env_var: ATLAS_GITHUB_TOKEN
+    persist: false
 path: ~/projects/surf-kit
 
 requires:

@@ -58,6 +58,21 @@ class TestLoadAll:
         manifests = load_all(fixtures_dir, filter_names=["nonexistent"])
         assert manifests == []
 
+    def test_load_all_orders_dependencies(self, tmp_path: Path) -> None:
+        (tmp_path / "atlas.project.yaml").write_text(
+            "name: atlas\n"
+            "repo: https://github.com/example/atlas\n"
+            "dependencies: [surf-kit]\n"
+        )
+        (tmp_path / "surf-kit.project.yaml").write_text(
+            "name: surf-kit\n"
+            "repo: https://github.com/example/surf-kit\n"
+        )
+
+        manifests = load_all(tmp_path, filter_names=["atlas"])
+
+        assert [manifest.name for manifest in manifests] == ["surf-kit", "atlas"]
+
 
 class TestListProjects:
     def test_list(self, fixtures_dir: Path) -> None:
