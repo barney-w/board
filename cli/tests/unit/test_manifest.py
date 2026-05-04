@@ -185,9 +185,7 @@ class TestRequiredKeyvaultSecrets:
         assert env == set()
         assert repo == set()
 
-    def test_shipped_atlas_and_surfkit_need_repo_auth_kv(
-        self, fixtures_dir: Path
-    ) -> None:
+    def test_shipped_atlas_and_surfkit_need_repo_auth_kv(self, fixtures_dir: Path) -> None:
         """Sanity: the project_root manifests (real atlas / surf-kit) reference
         `github-atlas-bootstrap-token` for repo auth. Use the real shipped
         manifests so a future copy-paste from this fixture can't drag stale

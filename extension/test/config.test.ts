@@ -13,12 +13,13 @@ import {
 function makeConfig(overrides: Partial<BoardConfig> = {}): BoardConfig {
   return {
     developerName: 'jbloggs',
-    environment: 'personal',
+    resourceGroup: 'rg-personal-aue-devvm',
     region: 'australiaeast',
-    regionShort: 'aue',
     authMethod: 'ssh-key',
     autoStartVm: true,
+    autoOpenTerminals: true,
     pollIntervalSeconds: 60,
+    tunnelUrl: '',
     ...overrides,
   };
 }
@@ -34,11 +35,11 @@ describe('config — pure derivation functions', () => {
     );
   });
 
-  it('getResourceGroup returns rg-<env>-<regionShort>-devvm', () => {
+  it('getResourceGroup returns the configured resourceGroup', () => {
     expect(getResourceGroup(makeConfig())).toBe('rg-personal-aue-devvm');
   });
 
-  it('getVmName returns vm-<env>-<regionShort>-devvm-<name>', () => {
+  it('getVmName strips leading rg- and appends developer name', () => {
     expect(getVmName(makeConfig())).toBe('vm-personal-aue-devvm-jbloggs');
   });
 
@@ -47,9 +48,15 @@ describe('config — pure derivation functions', () => {
     expect(result).toMatch(/\.ssh\/devvm-jbloggs$/);
   });
 
-  it('getResourceGroup uses environment field — sandbox', () => {
-    expect(getResourceGroup(makeConfig({ environment: 'sandbox' }))).toBe(
-      'rg-sandbox-aue-devvm',
+  it('getResourceGroup returns a different configured group', () => {
+    expect(
+      getResourceGroup(makeConfig({ resourceGroup: 'rg-sandbox-aue-devvm' })),
+    ).toBe('rg-sandbox-aue-devvm');
+  });
+
+  it('getVmName falls back to raw resourceGroup when no rg- prefix', () => {
+    expect(getVmName(makeConfig({ resourceGroup: 'team-platform' }))).toBe(
+      'vm-team-platform-jbloggs',
     );
   });
 
