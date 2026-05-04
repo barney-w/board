@@ -54,8 +54,8 @@ stop name env=default_env:
     @{{_board}} vm stop {{name}} --env {{env}}
 
 # SSH into a board (auto-detects auth method: Entra ID or SSH key)
-ssh name:
-    @{{_board}} vm ssh {{name}}
+ssh name *args:
+    @{{_board}} vm ssh {{name}} {{args}}
 
 # Show board status
 status name env=default_env:
@@ -229,49 +229,8 @@ code-server name env=default_env:
 tunnel-all name env=default_env:
     #!/usr/bin/env bash
     set -euo pipefail
-    HOST="devvm-{{name}}.{{default_location}}.cloudapp.azure.com"
-    KEY="$HOME/.ssh/devvm-{{name}}"
-    # Build SSH base command depending on auth method
-    if [ -f "$KEY" ]; then
-        SSH_BASE="ssh -i $KEY devuser@$HOST"
-    else
-        CERT_DIR="$HOME/.ssh/board-entra/devvm-{{name}}"
-        if [ -f "$CERT_DIR/id_rsa" ]; then
-            SSH_BASE="ssh -i $CERT_DIR/id_rsa -o CertificateFile=$CERT_DIR/id_rsa.pub-aadcert.pub $HOST"
-        else
-            echo "ERROR: No SSH key or Entra certificate found for devvm-{{name}}."
-            echo "Run: just ssh-config-write {{name}}"
-            exit 1
-        fi
-    fi
-    echo "Discovering listening ports on $HOST..."
-    PORTS=$($SSH_BASE \
-        "ss -tlnH 2>/dev/null | awk '{print \$4}' | grep -oP '(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]|localhost):?\K\d+' | sort -un | awk '\$1 <= 32767 && \$1 != 22'")
-    if [ -z "$PORTS" ]; then
-        echo "No services listening on the VM."
-        exit 0
-    fi
-    FORWARDS=""
-    SKIPPED=""
-    echo "Forwarding ports:"
-    while IFS= read -r port; do
-        if lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1; then
-            SKIPPED="$SKIPPED $port"
-        else
-            echo "  localhost:$port → VM:$port"
-            FORWARDS="$FORWARDS -L $port:localhost:$port"
-        fi
-    done <<< "$PORTS"
-    if [ -n "$SKIPPED" ]; then
-        echo "  (skipped, already in use locally:$SKIPPED)"
-    fi
-    if [ -z "$FORWARDS" ]; then
-        echo "All ports already forwarded (likely by VS Code)."
-        exit 0
-    fi
-    echo ""
-    echo "Press Ctrl+C to close all tunnels."
-    $SSH_BASE $FORWARDS -N
+    source cli/scripts/board-ssh.sh
+    board_forward_ports {{name}}
 
 # ── VS Code Tunnel ──
 
@@ -351,6 +310,24 @@ costs env=default_env:
 # Show cost breakdown for a specific developer
 costs-dev name env=default_env:
     @{{_board}} costs --env {{env}} --developer {{name}}
+
+# ── Project Dev Workflow ──
+
+# Start a project's dev workflow on the VM and forward its ports to localhost
+dev name project:
+    @bash cli/scripts/board-dev.sh start {{name}} {{project}}
+
+# Stop a running project (kills its tmux session on the VM)
+dev-stop name project:
+    @bash cli/scripts/board-dev.sh stop {{name}} {{project}}
+
+# Attach to the project's tmux session over SSH (Ctrl+B d to detach)
+dev-logs name project:
+    @bash cli/scripts/board-dev.sh logs {{name}} {{project}}
+
+# List running project sessions on the VM
+dev-list name:
+    @bash cli/scripts/board-dev.sh list {{name}}
 
 # ── Project Operations ──
 

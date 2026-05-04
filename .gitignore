@@ -78,5 +78,8 @@ docs/plans/
 # Personal workspace config
 myterm.toml
 
+# Corporate tag values (per-developer, may contain identifying info)
+board.tags.yaml
+
 # Starter kit build output
 *-board/
