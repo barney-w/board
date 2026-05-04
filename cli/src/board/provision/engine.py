@@ -5,6 +5,8 @@ Provisions a single project on a remote VM via SSH.
 
 from __future__ import annotations
 
+import os
+import shlex
 import time
 from typing import TYPE_CHECKING, Protocol
 
@@ -121,6 +123,80 @@ class ProvisionEngine:
         """Run command, return stdout."""
         result = await self.ssh.run(cmd, check=False)
         return getattr(result, "stdout", "") or ""
+
+    async def _run_git_with_auth(self, git_command: str) -> bool:
+        """Run a git command with temporary credentials when repo auth is configured."""
+        auth = self.manifest.repo_auth
+        if not auth:
+            return await self._run_ok(git_command)
+
+        if auth.type != "github-token":
+            self._error(f"Unsupported repo auth type for {self.manifest.name}: {auth.type}")
+            return False
+
+        script_lines = [
+            "set -euo pipefail",
+            "askpass=$(mktemp)",
+            'cleanup() { rm -f "$askpass"; }',
+            "trap cleanup EXIT",
+        ]
+
+        env_token = os.environ.get(auth.env_var, "") if auth.env_var else ""
+
+        if env_token:
+            script_lines.append(f"TOKEN={shlex.quote(env_token)}")
+        elif auth.keyvault_secret:
+            if not self.kv_name:
+                self._error(
+                    f"Repo auth for {self.manifest.name} requires --keyvault "
+                    f"({auth.keyvault_secret})"
+                )
+                return False
+            script_lines.extend(
+                [
+                    "logged_in=false",
+                    "for attempt in $(seq 1 8); do",
+                    "  if az login --identity --allow-no-subscriptions 2>/dev/null; then",
+                    "    logged_in=true; break",
+                    "  fi",
+                    '  echo "  RBAC not ready, retrying in 15s (attempt $attempt/8)..."',
+                    "  sleep 15",
+                    "done",
+                    'if ! $logged_in; then echo "ERROR: Failed to login with managed identity" >&2; exit 1; fi',
+                    (
+                        "TOKEN=$(az keyvault secret show --vault-name "
+                        f"{shlex.quote(self.kv_name)} --name "
+                        f"{shlex.quote(auth.keyvault_secret)} "
+                        "--query value -o tsv)"
+                    ),
+                ]
+            )
+        elif auth.env_var:
+            self._error(f"Repo auth for {self.manifest.name} requires ${auth.env_var} locally")
+            return False
+        else:
+            self._error(f"Repo auth for {self.manifest.name} has no token source")
+            return False
+
+        script_lines.extend(
+            [
+                'test -n "${TOKEN:-}"',
+                "export TOKEN",
+                "cat > \"$askpass\" << 'ASKPASS'",
+                "#!/usr/bin/env bash",
+                'case "$1" in',
+                "*Username*) printf '%s\\n' x-access-token ;;",
+                "*Password*) printf '%s\\n' \"$TOKEN\" ;;",
+                "*) printf '%s\\n' x-access-token ;;",
+                "esac",
+                "ASKPASS",
+                'chmod 700 "$askpass"',
+                f'GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 {git_command}',
+            ]
+        )
+
+        script = "\n".join(script_lines)
+        return await self._run_ok(f"bash -lc {shlex.quote(script)}")
 
     # ── Phase execution ──
 
@@ -255,16 +331,47 @@ class ProvisionEngine:
         self._step(2, "Clone repository")
         start = time.monotonic()
 
-        if await self._run_ok(f"test -d '{self.project_path}'"):
-            if await self._run_ok(f"cd '{self.project_path}' && git pull"):
+        repo_url = self.manifest.repo_url
+        repo_ref = self.manifest.repo_ref
+        quoted_project_path = shlex.quote(self.project_path)
+        quoted_repo_url = shlex.quote(repo_url)
+        quoted_repo_ref = shlex.quote(repo_ref)
+
+        if await self._run_ok(f"test -d {quoted_project_path}"):
+            await self._run_ok(
+                f"git -C {quoted_project_path} remote set-url origin {quoted_repo_url}"
+            )
+            if repo_ref:
+                pull_command = (
+                    f"git -C {quoted_project_path} fetch origin {quoted_repo_ref} && "
+                    f"(git -C {quoted_project_path} checkout {quoted_repo_ref} || "
+                    f"git -C {quoted_project_path} checkout -b {quoted_repo_ref} "
+                    f"origin/{quoted_repo_ref}) && "
+                    f"git -C {quoted_project_path} merge --ff-only FETCH_HEAD"
+                )
+            else:
+                pull_command = f"git -C {quoted_project_path} pull"
+
+            if await self._run_git_with_auth(pull_command):
                 self._success("Pulled latest changes")
             else:
                 self._warn(f"git pull failed for {self.manifest.name}")
         else:
-            if await self._run_ok(f"git clone '{self.manifest.repo}' '{self.project_path}'"):
-                self._success(f"Cloned {self.manifest.repo}")
+            clone_command = f"git clone {quoted_repo_url} {quoted_project_path}"
+            if repo_ref:
+                clone_command = (
+                    f"git clone --branch {quoted_repo_ref} {quoted_repo_url} {quoted_project_path}"
+                )
+            if await self._run_git_with_auth(clone_command):
+                if await self._run_ok(
+                    f"git -C {quoted_project_path} remote set-url origin {quoted_repo_url}"
+                ):
+                    self._success("Set clean origin URL")
+                else:
+                    self._warn(f"Could not reset origin URL for {self.manifest.name}")
+                self._success(f"Cloned {repo_url}")
             else:
-                self._error(f"Failed to clone {self.manifest.repo}")
+                self._error(f"Failed to clone {repo_url}")
                 return self._record_phase(2, "clone", False, start)
 
         # Install TTFC pre-push hook
@@ -291,8 +398,11 @@ class ProvisionEngine:
 
         env_file = f"{self.project_path}/{self.manifest.env.file}"
 
-        if self.kv_name:
-            self._info(f"Generating env provisioning script (Key Vault: {self.kv_name})...")
+        if self.kv_name or self.manifest.env.hardcoded:
+            if self.kv_name:
+                self._info(f"Generating env provisioning script (Key Vault: {self.kv_name})...")
+            else:
+                self._info("Generating env provisioning script...")
 
             script_lines = [
                 "#!/usr/bin/env bash",
@@ -343,7 +453,10 @@ class ProvisionEngine:
             await self._run(upload_cmd)
 
             if await self._run_ok(f"bash ~/projects/.board/env-{self.manifest.name}.sh"):
-                self._success(".env populated via Key Vault")
+                if self.kv_name:
+                    self._success(".env populated via Key Vault")
+                else:
+                    self._success(".env populated")
             else:
                 self._warn(
                     f"env provisioning script failed for {self.manifest.name} "
@@ -623,8 +736,26 @@ class ProvisionEngine:
         self._step(9, "Health check verification")
         start = time.monotonic()
 
+        # In dev mode, services aren't auto-started — the developer runs them
+        # interactively (e.g. `just dev`). Skip health checks tied to those
+        # service ports so we don't emit spurious failure warnings.
+        dev_service_ports: set[int] = set()
+        if self.manifest.dev is not None and self.manifest.services:
+            from urllib.parse import urlparse
+
+            for svc in self.manifest.services:
+                if svc.health_url:
+                    parsed = urlparse(svc.health_url)
+                    if parsed.port:
+                        dev_service_ports.add(parsed.port)
+
         if self.manifest.health:
             for check in self.manifest.health:
+                if check.port and check.port in dev_service_ports:
+                    self._info(
+                        f"{check.label}: skipped (start with '{self.manifest.dev.run}')"  # type: ignore[union-attr]
+                    )
+                    continue
                 if await self._run_ok(f"cd '{self.project_path}' && bash -c '{check.check}'"):
                     self._success(f"{check.label}: passed")
                 else:
