@@ -28,12 +28,54 @@ def load_all(
     filter_names: list[str] | None = None,
 ) -> list[ProjectManifest]:
     """Load all .project.yaml files from a directory, optionally filtering by name."""
-    manifests: list[ProjectManifest] = []
+    all_manifests: list[ProjectManifest] = []
     for path in sorted(directory.glob("*.project.yaml")):
         manifest = load(path)
-        if filter_names is None or manifest.name in filter_names:
-            manifests.append(manifest)
-    return manifests
+        all_manifests.append(manifest)
+
+    if filter_names is None:
+        manifests = all_manifests
+    else:
+        by_name = {manifest.name: manifest for manifest in all_manifests}
+        selected: set[str] = set()
+
+        def include_with_dependencies(name: str) -> None:
+            if name in selected:
+                return
+            manifest = by_name.get(name)
+            if manifest is None:
+                return
+            selected.add(name)
+            for dep_name in manifest.dependencies:
+                include_with_dependencies(dep_name)
+
+        for name in filter_names:
+            include_with_dependencies(name)
+        manifests = [manifest for manifest in all_manifests if manifest.name in selected]
+
+    ordered: list[ProjectManifest] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    by_name = {manifest.name: manifest for manifest in manifests}
+
+    def visit(manifest: ProjectManifest) -> None:
+        if manifest.name in visited:
+            return
+        if manifest.name in visiting:
+            return
+        visiting.add(manifest.name)
+        for dep_name in manifest.dependencies:
+            dependency = by_name.get(dep_name)
+            if dependency is not None:
+                visit(dependency)
+        visiting.remove(manifest.name)
+        visited.add(manifest.name)
+        ordered.append(manifest)
+
+    for manifest in manifests:
+        visit(manifest)
+
+    return ordered
 
 
 def list_projects(directory: Path) -> list[tuple[str, str]]:

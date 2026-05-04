@@ -15,6 +15,23 @@ class Requires(BaseModel):
     cloud_init: bool = False
 
 
+class RepoAuth(BaseModel):
+    """Optional repository clone authentication."""
+
+    type: Literal["github-token"]
+    keyvault_secret: str = ""
+    env_var: str = ""
+    persist: bool = False
+
+
+class RepoConfig(BaseModel):
+    """Repository clone configuration."""
+
+    url: str = ""
+    ref: str = ""
+    auth: RepoAuth | None = None
+
+
 class InstallStep(BaseModel):
     """A labelled idempotent install command."""
 
@@ -156,8 +173,9 @@ class ProjectManifest(BaseModel):
 
     name: str
     description: str = ""
-    repo: str = ""
+    repo: str | RepoConfig = ""
     path: str = ""
+    dependencies: list[str] = []
 
     requires: Requires = Requires()
     install: list[InstallStep] = []
@@ -174,6 +192,27 @@ class ProjectManifest(BaseModel):
     def project_path(self) -> str:
         """Resolve the project path, defaulting to ~/projects/<name>."""
         return self.path or f"~/projects/{self.name}"
+
+    @property
+    def repo_url(self) -> str:
+        """Resolve the clean Git clone URL."""
+        if isinstance(self.repo, RepoConfig):
+            return self.repo.url
+        return self.repo
+
+    @property
+    def repo_auth(self) -> RepoAuth | None:
+        """Optional repository auth config."""
+        if isinstance(self.repo, RepoConfig):
+            return self.repo.auth
+        return None
+
+    @property
+    def repo_ref(self) -> str:
+        """Optional branch, tag, or ref to checkout after clone."""
+        if isinstance(self.repo, RepoConfig):
+            return self.repo.ref
+        return ""
 
     @property
     def project_dir_name(self) -> str:

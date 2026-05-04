@@ -81,5 +81,9 @@ myterm.toml
 # Corporate tag values (per-developer, may contain identifying info)
 board.tags.yaml
 
+# Per-developer project manifests with tenant-specific identifiers
+# (templates live in projects/examples/)
+/projects/atlas.project.yaml
+
 # Starter kit build output
 *-board/

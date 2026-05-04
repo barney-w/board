@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import typer
@@ -45,6 +46,10 @@ def install_projects_command(
             con.error(f"No manifest directory found at {manifest_dir}")
             raise typer.Exit(1)
 
+        selected_projects = os.environ.get("BOARD_PROJECTS", "").split() or None
+        if selected_projects:
+            con.info(f"Projects: {' '.join(selected_projects)}")
+
         from board.provision.orchestrator import provision_projects
         from board.ssh.session import SSHSession
 
@@ -56,6 +61,7 @@ def install_projects_command(
                     manifest_dir=manifest_dir,
                     console=con.console,
                     keyvault_name=keyvault,
+                    filter_names=selected_projects,
                 )
             if fail_count > 0:
                 con.warn(f"{fail_count} project(s) had issues")
