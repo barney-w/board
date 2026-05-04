@@ -49,5 +49,3 @@ param adminSshPublicKey = ''  // unused with Entra ID
 // ── Networking ──
 
 param enablePublicIp = true
-param vnetAddressPrefix = '10.1.0.0/16'
-param subnetAddressPrefix = '10.1.1.0/24'
