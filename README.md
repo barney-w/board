@@ -59,6 +59,46 @@ For SSH-key boards, the passphrase comes separately (in person, by text, however
 
 ---
 
+## After connecting
+
+Two paths — pick whichever matches how you work.
+
+### Terminal (PowerShell, WSL, Git Bash, iTerm, …)
+
+`just ssh <vmname>` drops you into a 2-column workspace:
+
+```
+┌─────────────────────┬─────────────────────┐
+│  bash in ~/projects │  copilot (vibe)     │
+│  (your code, git…)  │  (chat, generate)   │
+└─────────────────────┴─────────────────────┘
+```
+
+- **Click** any pane to switch to it (mouse is on)
+- **Ctrl+B then d** — detach; your session keeps running on the VM
+- **Ctrl+B then z** — zoom the current pane fullscreen (toggle)
+- Reconnect any time with `just ssh <vmname>` — picks up where you left off
+- Want plain bash instead? `just ssh <vmname> --plain` (or `BOARD_NO_TMUX=1 ssh devuser@<host>`)
+
+### VS Code Remote-SSH
+
+- Click **Connect Now** in the Board Pass card → VS Code attaches to the VM
+- The `~/projects` folder opens automatically
+- Use `Ctrl+\` in the integrated terminal to split — drag panes to rearrange
+- Run `copilot` or `claude` in either pane for vibe coding
+- Start your app in the terminal (`yarn dev`, `npm run dev`, etc.) — VS Code detects the port and shows an **Open in Browser** notification, or click the **Ports** tab at the bottom for a list of all forwarded URLs
+
+### CLIs ready on the VM
+
+| Tool | What | First run |
+|---|---|---|
+| `gh` | GitHub CLI | `gh auth login` |
+| `glab` | GitLab CLI | `glab auth login --hostname <your-corp-gitlab>` |
+| `claude` | Claude Code CLI | `claude` |
+| `copilot` | GitHub Copilot CLI (already running in right pane) | — |
+
+---
+
 ## What you get
 
 Once connected, VS Code is running on a full Linux VM in the cloud. Everything is already configured:
@@ -115,6 +155,17 @@ just board                # interactive wizard — provisions a VM in ~11 min
 ```
 
 The wizard walks you through developer name, environment, project selection, VM size, and SSH key generation. Behind the scenes it deploys Azure infrastructure (Bicep + cloud-init), clones project repos, starts Docker services, and runs database migrations.
+
+<details>
+<summary>📋 <strong>Locked-down tenants</strong> — Azure Policy tags</summary>
+
+In tenants that enforce mandatory tags via Azure Policy, copy `board.tags.example.yaml` to `board.tags.yaml` (gitignored) and fill in your values. The wizard prompts *"Include extra tags?"* — answer **yes** to apply them to the resource group and every Bicep-deployed resource.
+
+Resource group naming is fixed at `rg-{env}-{region-short}-devvm`. To scope a board to a different group, pick a different `env` (e.g. `BOARD_ENVIRONMENT=team1`).
+
+Multiple boards can share one resource group. The shared vnet+subnet (`vnet-{prefix}` / `snet-{prefix}`) is created on first deploy and reused by every subsequent board. Each board still gets its own NSG, NIC, public IP, and VM.
+
+</details>
 
 ### Export a board pass
 

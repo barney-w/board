@@ -999,8 +999,8 @@ Three sidebar tree-view providers under the Board activity bar icon:
 | `autoStartTimezone` | string | `"AUS Eastern Standard Time"` | Timezone for auto-start |
 
 **Resources created:**
-- **NSG** — deny-all inbound baseline, allow SSH from `allowedSshSource`, conditional HTTPS
-- **VNet** — 10.0.0.0/16 with 10.0.1.0/24 subnet
+- **VNet + Subnet** — created once per RG by `infra/modules/network.bicep` (10.0.0.0/16 vnet, 10.0.1.0/24 subnet, hardcoded). `main.bicep` references both via `existing`.
+- **NSG** — per-board (`nsg-{prefix}-{developerName}`), attached at the NIC level. Deny-all inbound baseline, allow SSH from `allowedSshSourceIP`, conditional HTTPS.
 - **Public IP** — static allocation with DNS label (`devvm-{name}`)
 - **VM** — Ubuntu 24.04 LTS, Trusted Launch (Secure Boot + vTPM), system-assigned managed identity, no password auth, custom data = cloud-init YAML
 - **Auto-shutdown** — DevTestLab schedule (via module)
@@ -1017,6 +1017,15 @@ Three sidebar tree-view providers under the Board activity bar icon:
 **`infra/modules/auto-start.bicep`** — Logic App-based weekday auto-start schedule. Creates a weekly recurrence trigger, grants "Virtual Machine Contributor" to the Logic App's managed identity, and calls the VM start API.
 
 **`infra/bicepconfig.json`** — analyser rules: error on unused params/vars, no hardcoded URLs, no secrets in outputs; warning on literal admin usernames, old API versions.
+
+### 6.1.1 Shared network module
+
+`infra/modules/network.bicep` (new) — owns VNet + Subnet for the resource
+group. CIDRs are hardcoded (10.0.0.0/16 / 10.0.1.0/24). The CLI's
+`ensure_network` helper in `cli/src/board/azure/deployment.py` invokes this
+module on first board into the RG and reuses the existing vnet thereafter.
+Multiple boards in one RG share the subnet; each board owns its own NSG,
+NIC, public IP, and VM.
 
 ### 6.2 Cloud-Init
 
@@ -1485,6 +1494,18 @@ npm run dev              # Dev server at localhost:4321
 - TypeScript: Prettier + ESLint. `npm run lint && npm run format`.
 - Commits: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`)
 
+**Locked-down tenants (optional):**
+
+Tenants that enforce mandatory tags via Azure Policy need one extra setup step:
+
+```bash
+cp board.tags.example.yaml board.tags.yaml   # gitignored — fill in your tag values
+```
+
+The wizard prompts *"Include extra tags?"* — answer **yes** to apply the loaded tags to the resource group and every Bicep-deployed resource.
+
+Resource group naming is fixed at `rg-{env}-{region-short}-devvm` to preserve the cross-component naming contract with the VS Code extension. To scope a board to a different RG, pick a different `--env`.
+
 ---
 
 ## 14. Workflows
@@ -1497,13 +1518,21 @@ just board
 ```
 
 The 5-phase interactive wizard:
-1. **Configure** — developer name, environment, projects, Key Vault, SSH key, VM size
+1. **Configure** — developer name, environment, projects, Key Vault, extra tags, SSH key, VM size
 2. **Authenticate** — resolve Azure subscription
 3. **Review** — summary with estimated cost
 4. **Provision** — Bicep deploy, cloud-init wait (~8 min), project provisioning
 5. **Handoff** — SSH config, connection instructions, optional board pass
 
 Total time: ~11 minutes for a fresh board.
+
+**Tenant-policy overrides:**
+
+| Need | Flag / file |
+|---|---|
+| Mandatory Azure Policy tags | `cp board.tags.example.yaml board.tags.yaml`, fill in values, answer "yes" at the wizard's *Include extra tags?* prompt |
+
+`board.tags.yaml` is gitignored. Loaded tags are applied to the RG (via the Azure SDK) and to every Bicep resource (via the `extraTags` template parameter merged into `commonTags`).
 
 ### 14.2 Admin: Export a Board Pass
 
