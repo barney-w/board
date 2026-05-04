@@ -15,6 +15,7 @@ from board.core.manifest import (
     list_projects,
     load,
     load_all,
+    required_keyvault_secrets,
 )
 from board.models.manifest import ProjectManifest
 
@@ -60,13 +61,10 @@ class TestLoadAll:
 
     def test_load_all_orders_dependencies(self, tmp_path: Path) -> None:
         (tmp_path / "atlas.project.yaml").write_text(
-            "name: atlas\n"
-            "repo: https://github.com/example/atlas\n"
-            "dependencies: [surf-kit]\n"
+            "name: atlas\nrepo: https://github.com/example/atlas\ndependencies: [surf-kit]\n"
         )
         (tmp_path / "surf-kit.project.yaml").write_text(
-            "name: surf-kit\n"
-            "repo: https://github.com/example/surf-kit\n"
+            "name: surf-kit\nrepo: https://github.com/example/surf-kit\n"
         )
 
         manifests = load_all(tmp_path, filter_names=["atlas"])
@@ -86,6 +84,128 @@ class TestListProjects:
         desc_map = dict(projects)
         assert desc_map["surf"] == "AI platform (Python/FastAPI + Postgres)"
         assert desc_map["surf-kit"] == "Component library (React/pnpm)"
+
+
+# ── Required Key Vault secrets ──────────────────────────────────────────────
+
+
+class TestRequiredKeyvaultSecrets:
+    """The wizard's KV picker keys off this helper. If it misses a manifest
+    that needs Key Vault auth (env or repo-clone), the picker is skipped, the
+    user is never prompted, and project provisioning silently fails mid-run
+    with `Repo auth for X requires --keyvault`. Lock both code paths."""
+
+    @staticmethod
+    def _make(name: str, **kwargs: object) -> ProjectManifest:
+        return ProjectManifest(name=name, description="", **kwargs)  # type: ignore[arg-type]
+
+    def test_empty_when_no_manifest_needs_kv(self) -> None:
+        m = self._make("plain")
+        env, repo = required_keyvault_secrets([m])
+        assert env == set()
+        assert repo == set()
+
+    def test_collects_env_keyvault_secrets(self) -> None:
+        m = self._make(
+            "needs-env-kv",
+            env={
+                "keyvault_secrets": {
+                    "ANTHROPIC_API_KEY": "anthropic-prod",
+                    "OPENAI_API_KEY": "openai-prod",
+                },
+            },
+        )
+        env, repo = required_keyvault_secrets([m])
+        assert env == {"anthropic-prod", "openai-prod"}
+        assert repo == set()
+
+    def test_collects_repo_auth_keyvault_secret(self) -> None:
+        """Critical regression: a manifest whose ONLY KV need is repo-auth
+        must still surface in the KV requirements. A project that has no env
+        KV secrets but references a Key Vault secret for clone auth must
+        trigger the interactive Key Vault picker; otherwise the VM ships
+        without any projects cloned."""
+        m = self._make(
+            "private-repo",
+            repo={
+                "url": "https://github.com/example/private.git",
+                "auth": {
+                    "type": "github-token",
+                    "keyvault_secret": "github-bootstrap-token",
+                },
+            },
+        )
+        env, repo = required_keyvault_secrets([m])
+        assert env == set()
+        assert repo == {"github-bootstrap-token"}
+
+    def test_combines_env_and_repo_across_manifests(self) -> None:
+        a = self._make(
+            "a",
+            env={"keyvault_secrets": {"X": "secret-x"}},
+        )
+        b = self._make(
+            "b",
+            repo={
+                "url": "https://github.com/example/b.git",
+                "auth": {"type": "github-token", "keyvault_secret": "secret-y"},
+            },
+        )
+        c = self._make(
+            "c",
+            env={"keyvault_secrets": {"Z": "secret-z"}},
+            repo={
+                "url": "https://github.com/example/c.git",
+                "auth": {"type": "github-token", "keyvault_secret": "secret-w"},
+            },
+        )
+        env, repo = required_keyvault_secrets([a, b, c])
+        assert env == {"secret-x", "secret-z"}
+        assert repo == {"secret-y", "secret-w"}
+
+    def test_repo_string_form_has_no_auth(self) -> None:
+        """Manifests can declare `repo: <url-string>` (no auth block).
+        That shape has no keyvault_secret — must not crash, must return empty."""
+        m = self._make("plain-public", repo="https://github.com/example/public.git")
+        env, repo = required_keyvault_secrets([m])
+        assert env == set()
+        assert repo == set()
+
+    def test_repo_auth_without_keyvault_secret(self) -> None:
+        """auth.env_var-only (no keyvault_secret) should not be reported as a
+        Key Vault requirement — the developer supplies the token via env."""
+        m = self._make(
+            "env-token",
+            repo={
+                "url": "https://github.com/example/x.git",
+                "auth": {"type": "github-token", "env_var": "MY_TOKEN"},
+            },
+        )
+        env, repo = required_keyvault_secrets([m])
+        assert env == set()
+        assert repo == set()
+
+    def test_shipped_atlas_and_surfkit_need_repo_auth_kv(
+        self, fixtures_dir: Path
+    ) -> None:
+        """Sanity: the project_root manifests (real atlas / surf-kit) reference
+        `github-atlas-bootstrap-token` for repo auth. Use the real shipped
+        manifests so a future copy-paste from this fixture can't drag stale
+        expectations along."""
+        repo_root = fixtures_dir.resolve().parents[2]
+        projects_dir = repo_root / "projects"
+        if not projects_dir.is_dir():
+            return  # only meaningful when run inside the repo
+
+        manifests = load_all(projects_dir, filter_names=["atlas", "surf-kit"])
+        if not manifests:
+            return  # tolerate environments without these manifests
+        _env, repo = required_keyvault_secrets(manifests)
+        assert "github-atlas-bootstrap-token" in repo, (
+            "Expected atlas/surf-kit to declare repo.auth.keyvault_secret = "
+            "github-atlas-bootstrap-token. If you renamed it, update both the "
+            "manifests and Key Vault contents."
+        )
 
 
 # ── Systemd unit ─────────────────────────────────────────────────────────────
@@ -263,6 +383,33 @@ class TestGenerateWorkspace:
         assert ports["5432"]["onAutoForward"] == "silent"
         assert "5173" in ports
         assert ports["5173"]["label"] == "surf-kit dev server"
+
+
+def test_atlas_manifest_pins_vite_port_to_5175() -> None:
+    """Atlas Vite is hardcoded to 5175 in vite.config.ts because the Entra app
+    registration's SPA reply URIs only list 5175. The shipped manifest template
+    must auto-forward the same port; widening it requires updating the Entra
+    app registration first.
+
+    The shipped atlas manifest is the template in projects/examples/;
+    per-developer copies in projects/ are gitignored because they hold
+    tenant-specific identifiers.
+    """
+    from pathlib import Path
+
+    from board.core.manifest import load
+
+    repo_root = Path(__file__).resolve().parents[3]
+    atlas = load(repo_root / "projects" / "examples" / "atlas.project.yaml")
+
+    assert atlas.vscode is not None
+    ports = atlas.vscode.ports
+    assert list(ports.keys()) == ["5175"], (
+        f"Expected exactly one port '5175' on atlas, got {list(ports.keys())}. "
+        "If you intend to add another, double-check the Entra app reg first."
+    )
+    assert ports["5175"].label == "Atlas Web"
+    assert ports["5175"].auto_forward == "notify"
 
 
 # ── Check script ─────────────────────────────────────────────────────────────
