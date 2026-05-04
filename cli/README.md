@@ -29,7 +29,7 @@ board export-pass NAME Create encrypted board pass for a developer
 
 board vm start NAME   Start a VM
 board vm stop NAME    Stop (deallocate) a VM
-board vm ssh NAME     SSH into a VM
+board vm ssh NAME     SSH into a VM (add --plain to skip 2-column tmux layout)
 board vm ls           List all VMs in the environment
 board vm status NAME  Show detailed VM status
 board vm delete NAME  Delete a VM
@@ -45,6 +45,12 @@ board vm keygen NAME  Generate SSH keypair for a VM
 | `--env` | `BOARD_ENVIRONMENT` | Environment name (e.g. `personal`) |
 | `--location` | `BOARD_LOCATION` | Azure region (e.g. `australiaeast`) |
 | `--region-short` | `BOARD_REGION_SHORT` | Short region code (e.g. `aue`) |
+
+Resource group naming is fixed at `rg-{env}-{region-short}-devvm`. To scope a board to a different RG, pick a different `--env`.
+
+## Locked-down tenants
+
+If your Azure tenant enforces mandatory tags via Azure Policy, copy `board.tags.example.yaml` (at the repo root) to `board.tags.yaml` and fill in your values. The wizard prompts *"Include extra tags?"* — answer **yes** to apply the tags to the resource group and every Bicep-deployed resource. The file is gitignored.
 
 ## Development
 
