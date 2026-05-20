@@ -55,6 +55,7 @@ async def list_vms(
                 ),
                 "power_state": power_state,
                 "location": vm.location,
+                "tags": dict(vm.tags) if vm.tags else {},
             }
         )
     return results

@@ -154,6 +154,8 @@ async def _run_up(
         )
 
     # Resolve credential + caller principal up front so we can verify the RG.
+    credential_for_check: object | None = None
+    sub_id_for_check: str | None = None
     if dry_run:
         # Skip the live verify in dry run; trust the inputs.
         location = preset.get("location", "")
@@ -191,6 +193,60 @@ async def _run_up(
         location=location,
     )
     con.info(f"VM name: {deploy_cfg.vm_name}")
+
+    # Pre-flight: surface any boards already in this RG. Catches the silent
+    # duplicate trap where a user re-runs with a slightly different dev name
+    # and ends up with two of every per-VM resource.
+    if not dry_run and credential_for_check is not None and sub_id_for_check is not None:
+        from board.azure.compute import list_vms
+
+        with con.spin(f"Checking for existing boards in '{rg_name}'..."):
+            try:
+                rg_vms = await list_vms(
+                    credential_for_check,
+                    sub_id_for_check,
+                    rg_name,
+                )
+            except Exception as exc:  # noqa: BLE001 -- best-effort probe
+                con.warn(f"Could not list existing VMs: {exc}")
+                rg_vms = []
+
+        existing_boards = [
+            vm for vm in rg_vms if vm.get("tags", {}).get("project") == "devvm"
+        ]
+        name_conflict = any(vm["name"] == deploy_cfg.vm_name for vm in existing_boards)
+
+        if name_conflict:
+            con.error(
+                f"A board named '{deploy_cfg.vm_name}' already exists in '{rg_name}'. "
+                f"Pick a different developer name, or delete the existing board first "
+                f"with: board vm delete {dev_name}"
+            )
+            raise typer.Exit(1)
+
+        if existing_boards:
+            con.info(f"Found {len(existing_boards)} existing board(s) in this RG:")
+            for vm in existing_boards:
+                owner = vm.get("tags", {}).get("owner", "?")
+                size = vm.get("vm_size", "?")
+                power = vm.get("power_state", "?")
+                con.info(f"  • {vm['name']}  (owner: {owner}, {size}, {power})")
+            con.info(f"This run will add a new board: {deploy_cfg.vm_name}")
+
+            if non_interactive:
+                con.success("Non-interactive mode: proceeding with new board creation.")
+            else:
+                action = await prompts.choose(
+                    "How do you want to proceed?",
+                    [
+                        f"Create new board ({deploy_cfg.vm_name})",
+                        "Cancel — I'll delete an existing board first",
+                    ],
+                    default=f"Create new board ({deploy_cfg.vm_name})",
+                )
+                if "Cancel" in action:
+                    con.info("Cancelled. Delete a board with: board vm delete <name>")
+                    raise typer.Exit(0)
 
     # Project selection
     manifest_dir = _find_manifest_dir()
@@ -419,6 +475,29 @@ async def _run_up(
             dev_principal_id = principal_result.stdout.strip()
 
         con.success(f"Entra ID: tenant {tenant_id[:8]}..., principal {dev_principal_id[:8]}...")
+
+    # Security group for VM login RBAC + MFA (Entra ID only).
+    security_group_name = ""
+    if auth_method == "entra-id":
+        from board.azure.mfa import DEFAULT_GROUP_NAME
+
+        sg_policy_default = DEFAULT_GROUP_NAME
+        _policies_for_default = pol.load()
+        if _policies_for_default is not None:
+            sg_policy_default = _policies_for_default.security_group_name
+
+        env_sg = os.environ.get("BOARD_SECURITY_GROUP", "").strip()
+        if non_interactive:
+            security_group_name = env_sg or sg_policy_default
+            con.success(f"Security group: {security_group_name}")
+        else:
+            con.info("Existing Entra ID group used as-is; created if it doesn't exist.")
+            security_group_name = (
+                await prompts.input_text(
+                    "Security group for VM login",
+                    default=env_sg or sg_policy_default,
+                )
+            ).strip() or sg_policy_default
 
     # SSH key
     key_path = deploy_cfg.ssh_key_path_expanded
@@ -737,7 +816,6 @@ async def _run_up(
     # ── Resolve security group for VM RBAC (Entra ID only) ──
     rbac_principal_id = dev_principal_id
     rbac_principal_type = "User"
-    security_group_name = policies.security_group_name if policies is not None else "Board VM Users"
     login_group_id: str | None = None
 
     if auth_method == "entra-id":
@@ -777,8 +855,9 @@ async def _run_up(
                 location,
                 network_tags,
                 network_bicep,
+                allowed_ssh_source_ip=allowed_ssh_source_ip,
             )
-        con.success(f"Network: vnet-{prefix} ready (subnet snet-{prefix})")
+        con.success(f"Network: vnet-{prefix} ready (subnet snet-{prefix}, nsg-{prefix})")
     except (BoardError, DeploymentError) as exc:
         con.error(str(exc))
         raise typer.Exit(1) from exc
@@ -790,7 +869,6 @@ async def _run_up(
         "vmSku": vm_sku,
         "adminSshPublicKey": ssh_pub_key,
         "useEntraIdLogin": auth_method == "entra-id",
-        "allowedSshSourceIP": allowed_ssh_source_ip,
         "enableAutoStart": enable_auto_start,
     }
     if policies is not None and policies.auto_shutdown.enabled:
