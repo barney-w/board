@@ -211,9 +211,7 @@ async def _run_up(
                 con.warn(f"Could not list existing VMs: {exc}")
                 rg_vms = []
 
-        existing_boards = [
-            vm for vm in rg_vms if vm.get("tags", {}).get("project") == "devvm"
-        ]
+        existing_boards = [vm for vm in rg_vms if vm.get("tags", {}).get("project") == "devvm"]
         name_conflict = any(vm["name"] == deploy_cfg.vm_name for vm in existing_boards)
 
         if name_conflict:
