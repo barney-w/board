@@ -23,14 +23,8 @@ param osDiskSku string = 'StandardSSD_LRS'
 @description('SSH public key for the admin user')
 param adminSshPublicKey string
 
-@description('Source IP address or CIDR allowed to SSH. Must be specified explicitly.')
-param allowedSshSourceIP string
-
 @description('Whether to attach a public IP to the VM')
 param enablePublicIp bool = true
-
-@description('Whether to allow direct HTTPS access (port 443) for browser IDE reverse proxy')
-param enableDirectHttps bool = false
 
 @description('Idle-aware shutdown start time in HHmm format (VM powers off when idle after this)')
 param autoShutdownTime string = '1900'
@@ -111,66 +105,9 @@ var builtInTags = {
 }
 var commonTags = union(builtInTags, extraTags)
 
-// ── NSG Rules ──
-
-var baseSecurityRules = [
-  {
-    name: 'AllowSSHInbound'
-    properties: {
-      priority: 100
-      direction: 'Inbound'
-      access: 'Allow'
-      protocol: 'Tcp'
-      sourceAddressPrefix: allowedSshSourceIP
-      sourcePortRange: '*'
-      destinationAddressPrefix: '*'
-      destinationPortRange: '22'
-    }
-  }
-  {
-    name: 'DenyAllInbound'
-    properties: {
-      priority: 4096
-      direction: 'Inbound'
-      access: 'Deny'
-      protocol: '*'
-      sourceAddressPrefix: '*'
-      sourcePortRange: '*'
-      destinationAddressPrefix: '*'
-      destinationPortRange: '*'
-    }
-  }
-]
-
-var httpsRule = enableDirectHttps ? [
-  {
-    name: 'AllowHTTPSInbound'
-    properties: {
-      priority: 200
-      direction: 'Inbound'
-      access: 'Allow'
-      protocol: 'Tcp'
-      sourceAddressPrefix: allowedSshSourceIP
-      sourcePortRange: '*'
-      destinationAddressPrefix: '*'
-      destinationPortRange: '443'
-    }
-  }
-] : []
-
-// ── Module 1: NSG ──
-
-module nsg 'br/public:avm/res/network/network-security-group:0.5.3' = {
-  name: 'nsg-${developerName}-deployment'
-  params: {
-    name: 'nsg-${prefix}-${developerName}'
-    location: location
-    tags: commonTags
-    securityRules: concat(baseSecurityRules, httpsRule)
-  }
-}
-
-// ── Shared network (created out-of-band by the CLI's ensure_network helper) ──
+// ── Shared network + NSG (created out-of-band by the CLI's ensure_network helper) ──
+// NSG lives at subnet level and applies to every NIC in the subnet; no per-VM
+// NSG is created here. See infra/modules/network.bicep for the rules.
 
 resource existingVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: 'vnet-${prefix}'
@@ -239,12 +176,12 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.0' = {
       }
     ]
 
-    // Networking (NIC created by AVM module)
+    // Networking (NIC created by AVM module). No per-NIC NSG — the shared
+    // subnet-level NSG (created by ensure_network) applies to all ingress.
     nicConfigurations: [
       {
         name: 'nic-${prefix}-${developerName}'
         tags: commonTags
-        networkSecurityGroupResourceId: nsg.outputs.resourceId
         ipConfigurations: [
           {
             name: 'ipconfig01'
