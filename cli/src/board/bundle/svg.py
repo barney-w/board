@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape
@@ -245,8 +246,15 @@ def render_board_pass_png(
     All keyword arguments are forwarded to :func:`render_board_pass_svg`.
     """
     svg = render_board_pass_svg(**kwargs)
-    result = subprocess.run(
-        ["rsvg-convert", "-w", "1360", "-h", "840"],
+    rsvg = shutil.which("rsvg-convert")
+    if rsvg is None:
+        raise RuntimeError(
+            "rsvg-convert not found on PATH. Install librsvg: "
+            "`sudo apt install librsvg2-bin` (Debian/Ubuntu/WSL) or "
+            "`brew install librsvg` (macOS)."
+        )
+    result = subprocess.run(  # noqa: S603
+        [rsvg, "-w", "1360", "-h", "840"],
         input=svg.encode("utf-8"),
         capture_output=True,
         check=True,
