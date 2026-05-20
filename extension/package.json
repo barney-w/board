@@ -170,7 +170,7 @@
     "watch": "tsc -watch -p ./",
     "build": "node esbuild.config.js",
     "build:prod": "node esbuild.config.js --production",
-    "package": "npx @vscode/vsce package --no-dependencies",
+    "package": "npm run build:prod && npx @vscode/vsce package --no-dependencies",
     "lint": "npx eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
