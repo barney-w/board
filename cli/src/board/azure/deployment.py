@@ -360,7 +360,8 @@ async def ensure_network(
         # Re-run network.bicep once to attach one; AVM modules are idempotent
         # against the existing vnet/subnet.
         existing_nsg_ref = getattr(subnet, "network_security_group", None)
-        if existing_nsg_ref is not None and getattr(existing_nsg_ref, "id", ""):
+        existing_nsg_id = getattr(existing_nsg_ref, "id", None) if existing_nsg_ref else None
+        if existing_nsg_id:
             return vnet.id, subnet.id
 
     template = await bicep_build(network_bicep_path)
