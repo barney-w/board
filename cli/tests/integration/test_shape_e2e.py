@@ -88,7 +88,6 @@ class TestBicepParameterNames:
             "vmSku",
             "adminSshPublicKey",
             "environment",
-            "allowedSshSourceIP",
         }
         missing = required - setup_provides
         assert not missing, (
@@ -652,8 +651,8 @@ class TestBicepBuildIntegration:
 
 
 class TestSharedNetworkContract:
-    """Two boards into the same RG must share one vnet+subnet, and each VM gets
-    its own NSG (parameterised by developerName) so traffic stays scoped."""
+    """Two boards into the same RG must share one vnet+subnet+NSG so we don't
+    fan out into per-VM NSGs (the original duplicate-resource bug)."""
 
     @pytest.mark.asyncio
     async def test_first_board_creates_network_second_reuses(self) -> None:
@@ -667,12 +666,20 @@ class TestSharedNetworkContract:
             ),
             provisioning_state="Succeeded",
         )
+        # Subnet must report an attached NSG so the second call's early-return
+        # path fires (otherwise ensure_network re-deploys to attach one).
         succeeded_subnet = SimpleNamespace(
             id=(
                 "/subscriptions/x/resourceGroups/rg-myrg/providers/"
                 "Microsoft.Network/virtualNetworks/vnet-myrg/subnets/snet-myrg"
             ),
             provisioning_state="Succeeded",
+            network_security_group=SimpleNamespace(
+                id=(
+                    "/subscriptions/x/resourceGroups/rg-myrg/providers/"
+                    "Microsoft.Network/networkSecurityGroups/nsg-myrg"
+                )
+            ),
         )
 
         mock_client = MagicMock()
@@ -716,6 +723,7 @@ class TestSharedNetworkContract:
                 location="australiaeast",
                 tags={"env": "personal"},
                 network_bicep_path=Path("/fake/network.bicep"),
+                allowed_ssh_source_ip="203.0.113.5",
             )
             result2 = await ensure_network(
                 credential=MagicMock(),
@@ -725,6 +733,7 @@ class TestSharedNetworkContract:
                 location="australiaeast",
                 tags={"env": "personal"},
                 network_bicep_path=Path("/fake/network.bicep"),
+                allowed_ssh_source_ip="203.0.113.5",
             )
 
         # Both calls return the same vnet + subnet IDs
@@ -739,9 +748,9 @@ class TestSharedNetworkContract:
         # virtual_networks.get ran twice (once per ensure_network call)
         assert mock_client.virtual_networks.get.call_count == 2
 
-    def test_second_board_nsg_name_includes_developer(self) -> None:
-        """Compiled ARM template parameterises NSG names by developerName so two
-        boards in one RG get distinct NSGs."""
+    def test_main_template_has_no_per_vm_nsg(self) -> None:
+        """The per-VM NSG was moved to the shared network module; main.bicep
+        must no longer produce any networkSecurityGroups resources."""
         repo_root = Path(__file__).resolve().parents[3]
         main_json_path = repo_root / "infra" / "main.json"
         if not main_json_path.exists():
@@ -750,7 +759,6 @@ class TestSharedNetworkContract:
         template = json.loads(main_json_path.read_text())
 
         def _walk(node: object) -> Iterator[dict[str, object]]:
-            """Yield every dict in a possibly-nested ARM template structure."""
             if isinstance(node, dict):
                 yield node
                 for v in node.values():
@@ -759,47 +767,13 @@ class TestSharedNetworkContract:
                 for v in node:
                     yield from _walk(v)
 
-        # Find every resource of type Microsoft.Network/networkSecurityGroups
-        # (these may be nested inside Microsoft.Resources/deployments modules).
         nsg_resources = [
             d
             for d in _walk(template)
             if isinstance(d, dict) and d.get("type") == "Microsoft.Network/networkSecurityGroups"
         ]
-        assert nsg_resources, (
-            "Expected at least one Microsoft.Network/networkSecurityGroups resource "
-            "in compiled main.json"
-        )
-
-        # The NSG resource name itself uses parameters('name') because it sits
-        # inside an AVM module — the developerName interpolation happens where
-        # the parent main.bicep passes the `name` parameter to that module.
-        # Locate the parent deployment module(s) that wrap an NSG, and assert
-        # the `name` value passed in references developerName.
-        nsg_module_param_names: list[str] = []
-        for r in template.get("resources", []):
-            if r.get("type") != "Microsoft.Resources/deployments":
-                continue
-            nested_resources = r.get("properties", {}).get("template", {}).get("resources") or {}
-            # nested_resources can be a dict (symbolic-name format) or list.
-            nested_iter: list[dict[str, object]] = []
-            if isinstance(nested_resources, dict):
-                nested_iter = list(nested_resources.values())
-            elif isinstance(nested_resources, list):
-                nested_iter = nested_resources
-            has_nsg = any(
-                isinstance(nr, dict) and nr.get("type") == "Microsoft.Network/networkSecurityGroups"
-                for nr in nested_iter
-            )
-            if has_nsg:
-                name_param = (
-                    r.get("properties", {}).get("parameters", {}).get("name", {}).get("value", "")
-                )
-                nsg_module_param_names.append(str(name_param))
-
-        assert nsg_module_param_names, "No deployment module wrapping an NSG was found"
-        # At least one NSG module must have its `name` parameterised by developerName.
-        assert any("developerName" in n for n in nsg_module_param_names), (
-            f"Expected NSG module name to reference developerName so two boards "
-            f"in one RG get distinct NSGs. Got names: {nsg_module_param_names}"
+        assert not nsg_resources, (
+            "main.bicep must not declare any NSG — the subnet-level NSG is owned "
+            "by network.bicep and shared across boards. Found: "
+            f"{[r.get('name') for r in nsg_resources]}"
         )
