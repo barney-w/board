@@ -267,14 +267,20 @@ async def ensure_network(
     location: str,
     tags: dict[str, str],
     network_bicep_path: Path,
+    allowed_ssh_source_ip: str,
+    enable_direct_https: bool = False,
 ) -> tuple[str, str]:
-    """Ensure the shared per-RG vnet+subnet exists. Create if missing.
+    """Ensure the shared per-RG vnet+subnet+NSG exists. Create if missing.
 
-    The vnet is named ``vnet-{prefix}`` and the subnet ``snet-{prefix}``.
-    Multiple boards in the same RG share this network; this helper is
-    idempotent at the "does it exist?" level. If the vnet exists with a
-    different CIDR than network.bicep declares, the subsequent VM deploy
-    will fail loud at ARM ``existing`` resolution — by design.
+    The vnet is named ``vnet-{prefix}``, subnet ``snet-{prefix}``, and the
+    subnet-level NSG ``nsg-{prefix}``. Multiple boards in the same RG share
+    this network and ingress ruleset; the first board in the RG sets the
+    SSH source IP for everyone (B1 design — re-running a board never
+    rewrites the rules of an existing RG's NSG).
+
+    If the vnet exists with a different CIDR than network.bicep declares,
+    the subsequent VM deploy will fail loud at ARM ``existing`` resolution
+    — by design.
 
     Args:
         credential: Azure credential (e.g. DefaultAzureCredential).
@@ -282,9 +288,15 @@ async def ensure_network(
         resource_group: Target resource group (must already exist).
         prefix: Naming prefix (rgName minus any "rg-" prefix).
         location: Azure region for the new vnet (only used on create).
-        tags: Tags to apply to the new vnet+subnet (already merged with
-            extraTags by the caller). Ignored when reusing an existing vnet.
+        tags: Tags to apply to the new vnet+subnet+NSG (already merged
+            with extraTags by the caller). Ignored when reusing an existing
+            network.
         network_bicep_path: Path to ``infra/modules/network.bicep``.
+        allowed_ssh_source_ip: Source IP/CIDR for the subnet NSG's SSH
+            rule. Only applied on first create of the network; reusing an
+            RG silently ignores this value.
+        enable_direct_https: Whether to open port 443 at the subnet NSG.
+            Only applied on first create.
 
     Returns:
         ``(vnet_resource_id, subnet_resource_id)``.
@@ -343,9 +355,14 @@ async def ensure_network(
                 f"returned without a resource ID. Re-run after Azure settles."
             )
             raise BoardError(msg)
-        return vnet.id, subnet.id
 
-    # Vnet is missing — deploy network.bicep into the RG.
+        # Older RGs (pre-shared-NSG) have a subnet with no NSG attached.
+        # Re-run network.bicep once to attach one; AVM modules are idempotent
+        # against the existing vnet/subnet.
+        existing_nsg_ref = getattr(subnet, "network_security_group", None)
+        if existing_nsg_ref is not None and getattr(existing_nsg_ref, "id", ""):
+            return vnet.id, subnet.id
+
     template = await bicep_build(network_bicep_path)
     outputs = await deploy(
         credential,
@@ -356,6 +373,8 @@ async def ensure_network(
             "prefix": prefix,
             "location": location,
             "tags": tags,
+            "allowedSshSourceIP": allowed_ssh_source_ip,
+            "enableDirectHttps": enable_direct_https,
         },
         deployment_name=f"network-{prefix}-{int(time.time())}",
     )
