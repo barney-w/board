@@ -159,11 +159,11 @@ The wizard walks you through developer name, environment, project selection, VM 
 <details>
 <summary>📋 <strong>Locked-down tenants</strong> — Azure Policy tags</summary>
 
-In tenants that enforce mandatory tags via Azure Policy, copy `board.tags.example.yaml` to `board.tags.yaml` (gitignored) and fill in your values. The wizard prompts *"Include extra tags?"* — answer **yes** to apply them to the resource group and every Bicep-deployed resource.
+In tenants that enforce mandatory tags via Azure Policy, copy `board.tags.example.yaml` to `board.tags.yaml` (gitignored) and fill in your values. The wizard prompts *"Include extra tags?"* — answer **yes** to apply them to every Bicep-deployed resource.
 
-Resource group naming is fixed at `rg-{env}-{region-short}-devvm`. To scope a board to a different group, pick a different `env` (e.g. `BOARD_ENVIRONMENT=team1`).
+Board deploys *into* a resource group you supply — it never creates one. Pass `--rg <name>` on any command, or set `BOARD_RG=<name>` in your shell or `.env`. Every `just` recipe accepts the resource group as its last argument (`just status aivm1 rg-vibe`) and falls back to `BOARD_RG` when omitted.
 
-Multiple boards can share one resource group. The shared vnet+subnet (`vnet-{prefix}` / `snet-{prefix}`) is created on first deploy and reused by every subsequent board. Each board still gets its own NSG, NIC, public IP, and VM.
+VMs are named `vm-{rg-suffix}-{name}`, where `rg-suffix` is the resource group name with any leading `rg-` stripped (so `rg-vibe` → `vm-vibe-aivm1`). Multiple boards can share one resource group. The shared vnet+subnet (`vnet-{rg-suffix}` / `snet-{rg-suffix}`) is created on first deploy and reused by every subsequent board. Each board still gets its own NSG, NIC, public IP, and VM.
 
 </details>
 
