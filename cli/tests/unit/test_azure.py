@@ -584,9 +584,14 @@ def _subnet_object(
         "/virtualNetworks/vnet-test/subnets/snet-test"
     ),
     state: str = "Succeeded",
+    nsg_id: str | None = (
+        "/subscriptions/sub-123/resourceGroups/rg-test/providers/Microsoft.Network"
+        "/networkSecurityGroups/nsg-test"
+    ),
 ) -> SimpleNamespace:
-    """Mock subnet object with id + provisioning_state, matching SDK shape."""
-    return SimpleNamespace(id=subnet_id, provisioning_state=state)
+    """Mock subnet object with id + provisioning_state + optional NSG, matching SDK shape."""
+    nsg = SimpleNamespace(id=nsg_id) if nsg_id else None
+    return SimpleNamespace(id=subnet_id, provisioning_state=state, network_security_group=nsg)
 
 
 class TestEnsureNetwork:
@@ -618,6 +623,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags={"environment": "dev"},
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         assert result == (vnet_id, subnet_id)
@@ -658,6 +664,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags={"environment": "dev"},
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         assert result == ("/v", "/s")
@@ -669,6 +676,8 @@ class TestEnsureNetwork:
             "prefix": "test",
             "location": "australiaeast",
             "tags": {"environment": "dev"},
+            "allowedSshSourceIP": "*",
+            "enableDirectHttps": False,
         }
         # Subnet client must not be queried when vnet is missing.
         mock_client.subnets.get.assert_not_called()
@@ -696,6 +705,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags={},
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         msg = str(exc_info.value)
@@ -723,6 +733,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags={},
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         msg = str(exc_info.value)
@@ -749,6 +760,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags={},
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         msg = str(exc_info.value)
@@ -787,6 +799,7 @@ class TestEnsureNetwork:
                 location="australiaeast",
                 tags=custom_tags,
                 network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
             )
 
         await_args = deploy_mock.await_args
@@ -795,6 +808,74 @@ class TestEnsureNetwork:
         assert params["tags"] == {"costcenter": "CC-123", "owner": "barney"}
         assert params["prefix"] == "myprefix"
         assert params["location"] == "australiaeast"
+
+    @pytest.mark.asyncio
+    async def test_legacy_subnet_without_nsg_triggers_redeploy(self) -> None:
+        """vnet+subnet exist but subnet has no NSG attached → run network.bicep
+        once to attach the shared subnet NSG."""
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object()
+        mock_client.subnets.get.return_value = _subnet_object(nsg_id=None)
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch(
+                "board.azure.deployment.bicep_build",
+                new_callable=AsyncMock,
+                return_value={"resources": []},
+            ) as bicep_mock,
+            patch(
+                "board.azure.deployment.deploy",
+                new_callable=AsyncMock,
+                return_value={"vnetResourceId": "/v", "subnetResourceId": "/s"},
+            ) as deploy_mock,
+        ):
+            result = await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="legacy",
+                location="australiaeast",
+                tags={},
+                network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="198.51.100.7",
+                enable_direct_https=True,
+            )
+
+        assert result == ("/v", "/s")
+        bicep_mock.assert_awaited_once()
+        deploy_mock.assert_awaited_once()
+        await_args = deploy_mock.await_args
+        assert await_args is not None
+        params = await_args.kwargs["parameters"]
+        assert params["allowedSshSourceIP"] == "198.51.100.7"
+        assert params["enableDirectHttps"] is True
+
+    @pytest.mark.asyncio
+    async def test_subnet_with_attached_nsg_uses_early_return(self) -> None:
+        """Explicit cover of the happy path: existing subnet has an NSG → no deploy."""
+        mock_client = MagicMock()
+        mock_client.virtual_networks.get.return_value = _vnet_object()
+        mock_client.subnets.get.return_value = _subnet_object()  # nsg_id default = non-empty
+
+        with (
+            patch("board.azure.deployment.NetworkManagementClient", return_value=mock_client),
+            patch("board.azure.deployment.bicep_build", new_callable=AsyncMock) as bicep_mock,
+            patch("board.azure.deployment.deploy", new_callable=AsyncMock) as deploy_mock,
+        ):
+            await ensure_network(
+                credential=MagicMock(),
+                subscription_id="sub-123",
+                resource_group="rg-test",
+                prefix="test",
+                location="australiaeast",
+                tags={},
+                network_bicep_path=Path("/tmp/network.bicep"),
+                allowed_ssh_source_ip="*",
+            )
+
+        bicep_mock.assert_not_awaited()
+        deploy_mock.assert_not_awaited()
 
 
 # ── VM List Parsing Tests ──
@@ -811,6 +892,7 @@ class TestListVms:
                 os_disk=SimpleNamespace(os_type="Linux"),
             ),
             location="australiaeast",
+            tags={"project": "devvm", "owner": "jbloggs"},
         )
         mock_instance_view = SimpleNamespace(
             statuses=[
@@ -868,6 +950,7 @@ class TestListVms:
                 os_disk=SimpleNamespace(os_type="Linux"),
             ),
             location="eastus",
+            tags=None,
         )
         mock_instance_view = SimpleNamespace(
             statuses=[
